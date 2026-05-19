@@ -1,0 +1,137 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# =============================================================================
+#  Package metadata
+# =============================================================================
+[project]
+name = "apex-bench"
+version = "0.1.0"
+description = "Reproducible runner and tooling around the Mercor APEX-v1-extended LLM evaluation benchmark."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Jerry Gu" },
+]
+keywords = ["llm", "benchmark", "apex", "evaluation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# --- Runtime dependencies ----------------------------------------------------
+# Pinned exactly the way the vendored Mercor harness expects them.
+# Bumping these requires re-validating end-to-end against the upstream commit
+# recorded in vendor/apex_evals/UPSTREAM.md.
+dependencies = [
+    # --- Vendored harness deps (must match vendor/apex_evals/requirements.txt) ---
+    "litellm==1.83.0",
+    "pydantic>=2.0.0",
+    "aiohttp",
+    "reductoai",
+    "python-dotenv",
+    "tqdm",
+    "ijson",
+
+    # --- apex_bench wrapper deps ---
+    "typer>=0.12",
+    "rich>=13",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "types-pyyaml",
+]
+
+[project.scripts]
+apex-bench = "apex_bench.cli:app"
+
+# =============================================================================
+#  Setuptools
+# =============================================================================
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["apex_bench*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+apex_bench = ["py.typed"]
+
+# =============================================================================
+#  Ruff (lint + format)
+# =============================================================================
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["vendor/"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",  # line-too-long — formatter handles it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+"src/apex_bench/__main__.py" = ["E402"]
+# Typer/Click require typer.Option() calls in argument defaults; that pattern
+# is what makes --help work. B008 fires on it unavoidably.
+"src/apex_bench/cli.py" = ["B008"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# =============================================================================
+#  Mypy
+# =============================================================================
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+exclude = ["vendor/", "build/", "dist/"]
+
+[[tool.mypy.overrides]]
+module = ["generation.*", "grading.*", "call_llm.*", "parser.*", "litellm.*", "reductoai.*"]
+ignore_missing_imports = true
+
+# =============================================================================
+#  Pytest
+# =============================================================================
+[tool.pytest.ini_options]
+minversion = "7.4"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+asyncio_mode = "auto"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:pydantic.*",
+    "ignore::DeprecationWarning:litellm.*",
+]

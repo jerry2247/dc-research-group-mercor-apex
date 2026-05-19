@@ -1,0 +1,11 @@
+# Tell GitHub Linguist that the vendored harness is not our code.
+# Effects:
+#   - vendor/ contribution is excluded from the repo's language stats
+#   - vendor/ is excluded from PR diff stats by default
+#   - linguist treats it as "vendored", which collapses it in the PR
+#     review UI
+#
+# This is correct and standard for any pinned third-party source we
+# vendor verbatim. See vendor/apex_evals/UPSTREAM.md for the pinned
+# commit + the 2-line patch documented in vendor/apex_evals/PATCHES.md.
+vendor/** linguist-vendored=true
