@@ -1,0 +1,857 @@
+"""Multi-task APEX runner.
+
+This module is a *faithful fork* of the upstream Mercor reference runner
+`vendor/apex_evals/examples/run_with_hf.py` (commit
+6cbf3f43156bf332329abe76ed4a695fc71ec5b0, 2026-04-09). The loop semantics,
+result-row shape, resume-by-completed-task mechanism, and end-of-run stats
+aggregation are copied byte-for-byte from upstream. Only the following
+points differ, all centralized at the top of `run_async`:
+
+  1. The hardcoded upstream `MODELS` list is replaced by a single profile
+     picked from `apex_bench.test_models` via the CLI `--model` flag.
+     Project policy: one test model per invocation, one run per task.
+     Re-runs against a different model are separate invocations.
+  2. The hardcoded upstream `GRADING_MODEL = "gemini-2.5-flash"` is replaced
+     by `apex_bench.config.DEFAULT_JUDGE_MODEL` (project default: gpt-5.5
+     at OpenAI's medium reasoning effort).
+  3. The hardcoded upstream `Path("prompt/...")` loads (which fail when CWD
+     is not the vendor directory) are replaced by reads from the absolute
+     vendor path via `apex_bench.paths.vendor_dir`. The grading template is
+     always passed explicitly to `GradingTask` to work around the upstream
+     CWD-dependent module load bug; see `docs/HARNESS_NOTES.md`.
+
+Everything else — per-task generate→grade→write loop, per-criterion judge
+calls, status="completed" resume, median/mean stats — is preserved.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import csv
+import hashlib
+import json
+import logging
+import os
+import statistics
+import subprocess
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from apex_bench import __version__
+from apex_bench.config import (
+    DEFAULT_JUDGE_MAX_TOKENS,
+    DEFAULT_JUDGE_MODEL,
+    DEFAULT_JUDGE_TEMPERATURE,
+)
+from apex_bench.dataset import Task, csv_path, load_tasks, validate
+from apex_bench.paths import repo_root, vendor_dir
+from apex_bench.test_models import TestModelProfile
+from apex_bench.vendor_imports import vendor_cwd
+
+log = logging.getLogger(__name__)
+
+ATTACHMENT_BLOCK_MARKER = "==== Attached files content: ===="
+
+
+# -----------------------------------------------------------------------------
+# Reasoning-model judge handling
+# -----------------------------------------------------------------------------
+
+# OpenAI reasoning models (gpt-5 family, o-series) reject any temperature
+# other than 1.0. If the user (or the project default) supplies something
+# else, we coerce it to 1.0 with a warning rather than have the run blow up
+# on Attempt 7 of a hopeless retry loop -- which is what happened to the
+# first real apex-bench run on 2026-05-19.
+_REASONING_JUDGE_PREFIXES: tuple[str, ...] = ("gpt-5", "o1", "o3", "o4")
+
+
+def _safe_judge_temperature(model_id: str, requested: float) -> float:
+    """Return a temperature compatible with the judge model.
+
+    For OpenAI reasoning models (``gpt-5.x``, ``o``-series), the API only
+    accepts ``temperature == 1.0``. We coerce any other value to 1.0 and
+    emit a warning. Other models (Gemini, Claude, Grok, ...) receive the
+    requested value unchanged.
+    """
+    bare = model_id.split("/")[-1] if "/" in model_id else model_id
+    is_reasoning = any(bare.startswith(p) for p in _REASONING_JUDGE_PREFIXES)
+    if is_reasoning and requested != 1.0:
+        log.warning(
+            "judge %s is a reasoning model -- coercing temperature %.3f to 1.0 "
+            "(OpenAI rejects any non-default temperature for reasoning models)",
+            model_id,
+            requested,
+        )
+        return 1.0
+    return requested
+
+
+# -----------------------------------------------------------------------------
+# Public types
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class JudgeOverride:
+    """Optional grading-side overrides. Defaults mirror config.DEFAULT_JUDGE_*."""
+
+    model_id: str = DEFAULT_JUDGE_MODEL
+    temperature: float = DEFAULT_JUDGE_TEMPERATURE
+    max_tokens: int = DEFAULT_JUDGE_MAX_TOKENS
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    """One full apex-bench run.
+
+    All paths are absolute. The runner does not consult environment variables
+    except for the API keys that LiteLLM, boto3, and Reducto read directly.
+    """
+
+    profile: TestModelProfile
+    judge: JudgeOverride
+    dataset_dir: Path
+    output_csv: Path
+    domain: str | None = None
+    task_ids: tuple[str, ...] | None = None
+    start_index: int = 0
+    limit: int | None = None
+
+
+@dataclass(frozen=True)
+class TaskOutcome:
+    task_id: str
+    domain: str
+    status: str  # "completed" | "skipped"
+    response_chars: int
+    percentage_score: float | None
+    points_earned: float | None
+    points_possible: int | None
+
+
+# -----------------------------------------------------------------------------
+# CSV schema — preserved from upstream run_with_hf.py:55-61
+# -----------------------------------------------------------------------------
+
+# Upstream uses one column-suffix scheme per (model_key, run_index). We hold
+# RUNS_PER_TASK=1 and run exactly one test-model profile per invocation, so
+# our column suffix is `<model_key>_1_<field>`.
+RESULT_FIELDS = ("response", "score", "score_summary")
+
+
+def sanitize_model_key(model_id: str) -> str:
+    """Upstream sanitize() — identical to run_with_hf.py:47."""
+    return model_id.replace("-", "_").replace(".", "_").replace("/", "_")
+
+
+def csv_headers(model_key: str) -> list[str]:
+    """Per-task row schema. Preserves upstream's shape, adds audit columns.
+
+    Columns we inherit from upstream (`run_with_hf.py:55-61`):
+        task_id, domain, status,
+        <model_key>_1_response, <model_key>_1_score, <model_key>_1_score_summary,
+        generation_chars, wall_time_seconds,
+        judge_model, test_model_profile, test_model_id
+
+    Additive audit columns record the vendor's existing telemetry and a
+    fingerprint of what actually reached the model. They do not change
+    generation, grading, resume, or scoring behavior.
+    """
+    base = ["task_id", "domain", "status"]
+    for field in RESULT_FIELDS:
+        base.append(f"{model_key}_1_{field}")
+    base.extend(
+        [
+            "generation_chars",
+            "wall_time_seconds",
+            "attachments_expected",
+            "attachments_sent",
+            "parsed_attachment_chars",
+            "final_prompt_chars",
+            "final_prompt_sha256",
+            "agent_input_tokens",
+            "agent_output_tokens",
+            "agent_tokens",
+            "agent_usage_available",
+            "agent_usage_source",
+            "agent_usage_consistent",
+            "judge_model",
+            "test_model_profile",
+            "test_model_id",
+        ]
+    )
+    return base
+
+
+# -----------------------------------------------------------------------------
+# Vendor-template loaders (run-time so paths resolve correctly)
+# -----------------------------------------------------------------------------
+
+
+def _read_response_generation_template() -> str:
+    """Returns the response-generation prompt CONTENT.
+
+    We substitute {{Domain}} and {{Prompt}} into this ourselves and pass the
+    resulting prompt to GenerationTask, so the file's content is what we
+    need (not the path).
+    """
+    p = vendor_dir() / "prompt" / "response_generation_prompt.txt"
+    if not p.is_file():
+        raise RuntimeError(
+            f"missing vendor response_generation_prompt.txt at {p}. Did `make install` succeed?"
+        )
+    return p.read_text(encoding="utf-8")
+
+
+def _grading_template_path() -> str:
+    """Returns the ABSOLUTE PATH to the grading prompt template, as a string.
+
+    The vendor's GradingTask.grading_prompt_template is documented as
+    Optional[str], with _resolve_prompt_template() doing:
+        candidate = Path(template); if candidate.exists(): return candidate.read_text(); else return template
+
+    That check is unguarded against macOS ENAMETOOLONG: if you pass the
+    template *content* (>255 chars), Path.exists() raises OSError instead
+    of returning False. So we pass the PATH and let the vendor read the
+    file itself. Confirmed by the trace from a real run on 2026-05-19.
+    """
+    p = vendor_dir() / "prompt" / "grading_prompt.txt"
+    if not p.is_file():
+        raise RuntimeError(f"missing vendor grading_prompt.txt at {p}. Did `make install` succeed?")
+    return str(p)
+
+
+# -----------------------------------------------------------------------------
+# Resume / IO  — direct ports of upstream
+# -----------------------------------------------------------------------------
+
+
+def load_completed_task_ids(output_csv: Path) -> set[str]:
+    """Port of upstream load_completed_tasks() at run_with_hf.py:77-86."""
+    if not output_csv.is_file():
+        return set()
+    completed: set[str] = set()
+    with output_csv.open(encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if row.get("status") == "completed":
+                completed.add(row.get("task_id", ""))
+    return completed
+
+
+def append_row(output_csv: Path, headers: list[str], row: dict) -> None:
+    """Port of upstream save_result() at run_with_hf.py:89-93."""
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    new_file = not output_csv.is_file()
+    with output_csv.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
+        if new_file:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def failure_log_path(output_csv: Path) -> Path:
+    """Sidecar JSONL file for tasks that were selected but not completed."""
+    return output_csv.with_name(f"{output_csv.stem}.failures.jsonl")
+
+
+def manifest_path(output_csv: Path) -> Path:
+    """Sidecar JSON manifest describing the exact run configuration."""
+    return output_csv.with_name(f"{output_csv.stem}.run_manifest.json")
+
+
+def append_failure(output_csv: Path, failure: dict[str, Any]) -> None:
+    """Persist skipped-task context without polluting the upstream-style CSV."""
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "timestamp": _utc_now(),
+        "output_csv": str(output_csv),
+        **failure,
+    }
+    with failure_log_path(output_csv).open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def write_manifest(output_csv: Path, manifest: dict[str, Any]) -> None:
+    """Write a deterministic JSON manifest next to the result CSV."""
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path(output_csv).write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _sha256_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _parsed_attachment_text_from_prompt(final_prompt: str) -> str:
+    """Return the vendor-appended attachment block, or empty string if absent."""
+    if ATTACHMENT_BLOCK_MARKER not in final_prompt:
+        return ""
+    return final_prompt.split(ATTACHMENT_BLOCK_MARKER, 1)[1].strip()
+
+
+def _missing_attachment_sections(final_prompt: str, filenames: list[str]) -> list[str]:
+    parsed_text = _parsed_attachment_text_from_prompt(final_prompt)
+    return [name for name in filenames if f"=== {name} ===" not in parsed_text]
+
+
+def _agent_usage_fields(gen_row: dict[str, Any], gen_result: Any) -> dict[str, Any]:
+    """Extract provider-reported agent usage from the vendored generation result.
+
+    The vendored harness fills these from `response.usage.prompt_tokens`,
+    `response.usage.completion_tokens`, and `response.usage.total_tokens`.
+    We do not compute or save cost here because the exposed cost field is a
+    LiteLLM estimate, not a provider billing value.
+    """
+    input_tokens = int(gen_row.get("input_tokens", 0) or 0)
+    output_tokens = int(gen_row.get("output_tokens", 0) or 0)
+    total_tokens = int(gen_row.get("tokens_used", 0) or getattr(gen_result, "total_tokens", 0) or 0)
+    usage_available = input_tokens > 0 or output_tokens > 0 or total_tokens > 0
+    return {
+        "agent_input_tokens": input_tokens,
+        "agent_output_tokens": output_tokens,
+        "agent_tokens": total_tokens,
+        "agent_usage_available": usage_available,
+        "agent_usage_source": "provider_response_via_litellm" if usage_available else "unavailable",
+        "agent_usage_consistent": total_tokens == input_tokens + output_tokens,
+    }
+
+
+def _git_output(args: list[str]) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=repo_root(),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip()
+
+
+def _vendor_upstream_commit() -> str | None:
+    upstream_md = vendor_dir() / "UPSTREAM.md"
+    if not upstream_md.is_file():
+        return None
+    for line in upstream_md.read_text(encoding="utf-8").splitlines():
+        if "Upstream commit" in line and "`" in line:
+            parts = line.split("`")
+            if len(parts) >= 2:
+                return parts[1]
+    return None
+
+
+def _template_sha256s() -> dict[str, str | None]:
+    prompt_dir = vendor_dir() / "prompt"
+    return {
+        "response_generation_prompt.txt": _sha256_file(
+            prompt_dir / "response_generation_prompt.txt"
+        ),
+        "grading_prompt.txt": _sha256_file(prompt_dir / "grading_prompt.txt"),
+    }
+
+
+def _redact_profile_kwargs(profile: TestModelProfile) -> dict[str, Any]:
+    """Profile kwargs are persisted because they are run-critical and secret-free."""
+    return profile.to_model_config_kwargs()
+
+
+def build_run_manifest(
+    opts: RunOptions,
+    selected: list[Task],
+    pending: list[Task],
+    headers: list[str],
+    *,
+    status: str,
+    saved: int = 0,
+    skipped: int = 0,
+    stats: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Describe the exact non-secret run state for reproducibility review."""
+    git_status = _git_output(["status", "--short"])
+    dataset_csv = csv_path(opts.dataset_dir)
+    judge_temperature = _safe_judge_temperature(opts.judge.model_id, opts.judge.temperature)
+    return {
+        "schema_version": 1,
+        "status": status,
+        "created_or_updated_at": _utc_now(),
+        "apex_bench_version": __version__,
+        "run_policy": {
+            "runs_per_task": 1,
+            "domain_filter": opts.domain,
+            "task_ids": list(opts.task_ids or ()),
+            "start_index": opts.start_index,
+            "limit": opts.limit,
+        },
+        "repo": {
+            "root": str(repo_root()),
+            "head": _git_output(["rev-parse", "HEAD"]),
+            "dirty": bool(git_status),
+            "dirty_status_short": git_status.splitlines() if git_status else [],
+        },
+        "vendor": {
+            "path": str(vendor_dir()),
+            "mercor_apex_evals_commit": _vendor_upstream_commit(),
+            "prompt_template_sha256": _template_sha256s(),
+        },
+        "dataset": {
+            "dir": str(opts.dataset_dir),
+            "csv": str(dataset_csv),
+            "csv_sha256": _sha256_file(dataset_csv),
+            "selected_tasks": len(selected),
+            "pending_tasks_at_start": len(pending),
+            "task_ids": [t.task_id for t in selected],
+            "domains": sorted({t.domain for t in selected}),
+        },
+        "test_model": {
+            "profile": opts.profile.name,
+            "provider": opts.profile.provider,
+            "model_id": opts.profile.model_id,
+            "model_config_kwargs": _redact_profile_kwargs(opts.profile),
+        },
+        "judge": {
+            "model_id": opts.judge.model_id,
+            "max_tokens": opts.judge.max_tokens,
+            "requested_temperature": opts.judge.temperature,
+            "effective_temperature": judge_temperature,
+        },
+        "outputs": {
+            "csv": str(opts.output_csv),
+            "failures_jsonl": str(failure_log_path(opts.output_csv)),
+            "headers": headers,
+        },
+        "progress": {
+            "saved_this_invocation": saved,
+            "skipped_this_invocation": skipped,
+            "stats": stats or {},
+        },
+    }
+
+
+def _required_api_key(model_id: str, provider: str | None = None) -> str | None:
+    if provider == "xai" or model_id.startswith("xai/") or model_id.startswith("grok"):
+        return "XAI_API_KEY"
+    if provider == "openai" or model_id.startswith(("openai/", "gpt-", "o1", "o3", "o4")):
+        return "OPENAI_API_KEY"
+    if provider == "anthropic-bedrock" or model_id.startswith("bedrock/"):
+        return "AWS_ACCESS_KEY_ID"
+    if model_id.startswith(("anthropic/", "claude")):
+        return "ANTHROPIC_API_KEY"
+    if model_id.startswith(("gemini/", "gemini", "google/")):
+        return "GOOGLE_API_KEY"
+    return None
+
+
+def _preflight_credentials(opts: RunOptions, selected: list[Task]) -> None:
+    """Fail before a long run if required credentials are obviously missing."""
+    if not selected:
+        return
+
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(repo_root() / ".env", override=False)
+    except Exception:
+        pass
+
+    missing: list[str] = []
+    test_key = _required_api_key(opts.profile.model_id, opts.profile.provider)
+    judge_key = _required_api_key(opts.judge.model_id)
+    for key in (test_key, judge_key):
+        if key and not os.environ.get(key) and key not in missing:
+            missing.append(key)
+    if any(t.attachments for t in selected) and not os.environ.get("REDUCTO_API_KEY"):
+        missing.append("REDUCTO_API_KEY")
+    if missing:
+        raise RuntimeError(
+            "missing required environment variable(s): "
+            + ", ".join(missing)
+            + ". Load your .env or export the keys before running apex-bench."
+        )
+
+
+# -----------------------------------------------------------------------------
+# Per-task generate + grade  — direct port of upstream process_task()
+# -----------------------------------------------------------------------------
+
+
+async def _process_task(
+    task: Task,
+    profile: TestModelProfile,
+    judge: JudgeOverride,
+    response_template: str,
+    grading_template_path: str,
+) -> tuple[str, dict] | tuple[None, str]:
+    """Generate and grade one task. Returns (status, row_dict) or (None, error).
+
+    `status` is "completed" on success. If any sub-step fails the task is
+    skipped, mirroring upstream behavior at run_with_hf.py:144-191 — a task
+    row is written ONLY if all (model x run) combinations succeed.
+    """
+    # Lazy imports so module-level import works without the vendor install.
+    with vendor_cwd():
+        from generation import Attachment as VendorAttachment
+        from generation import (
+            GenerationTask,
+            ModelConfig,
+            run_generation_task_async,
+        )
+        from grading import (
+            GradingModelConfig,
+            GradingTask,
+            run_grading_task_async,
+        )
+
+    model_key = sanitize_model_key(profile.model_id)
+    prefix = f"{model_key}_1"
+
+    # --- Build prompt + attachments (same as upstream) ---
+    prompt = response_template.replace("{{Domain}}", task.domain).replace("{{Prompt}}", task.prompt)
+    attachments = [
+        VendorAttachment(filename=a.path.name, url=f"file://{a.path}")
+        for a in task.attachments
+        if a.exists
+    ]
+    missing = [a for a in task.attachments if not a.exists]
+    if missing:
+        log.warning(
+            "task %s: %d attachment file(s) missing on disk: %s",
+            task.task_id,
+            len(missing),
+            [a.rel_path for a in missing],
+        )
+        return None, f"attachment file(s) missing on disk: {[a.rel_path for a in missing]}"
+
+    started = time.time()
+
+    # --- Generate ---
+    try:
+        gen_kwargs = profile.to_model_config_kwargs()
+        gen_task = GenerationTask(
+            prompt=prompt,
+            models=[ModelConfig(**gen_kwargs)],
+            attachments=attachments or None,
+        )
+        gen_result = await run_generation_task_async(gen_task)
+    except Exception as exc:
+        return None, f"generation raised: {type(exc).__name__}: {exc}"
+
+    if not gen_result.results or not gen_result.results[0].get("success"):
+        err = (
+            gen_result.results[0].get("error_message", "unknown error")
+            if gen_result.results
+            else "no results"
+        )
+        return None, f"generation failed: {err}"
+    gen_row = gen_result.results[0]
+    response = gen_row.get("response", "") or ""
+
+    if not response.strip():
+        return None, "generation returned empty response"
+    if not task.rubric_json.strip():
+        return None, "task has empty rubric — skip"
+
+    final_prompt = str(gen_row.get("final_prompt") or "")
+    parsed_attachments = _parsed_attachment_text_from_prompt(final_prompt)
+    if attachments and not parsed_attachments:
+        return None, "attachment parsing produced no text; refusing to score prompt-only run"
+    if attachments and ATTACHMENT_BLOCK_MARKER not in final_prompt:
+        return None, "final prompt is missing the vendor attachment-content block"
+    missing_sections = _missing_attachment_sections(
+        final_prompt,
+        [attachment.filename for attachment in attachments],
+    )
+    if missing_sections:
+        return None, f"attachment parsing missing section(s): {missing_sections}"
+
+    # --- Grade ---
+    judge_cfg = GradingModelConfig(
+        model_id=judge.model_id,
+        max_tokens=judge.max_tokens,
+        temperature=_safe_judge_temperature(judge.model_id, judge.temperature),
+    )
+    # Pass the PATH (not the content) -- see _grading_template_path() for why.
+    grading_task = GradingTask(
+        solution=response,
+        rubric=task.rubric_json,
+        grading_model=judge_cfg,
+        grading_prompt_template=grading_template_path,
+    )
+    try:
+        grade_result = await run_grading_task_async(grading_task)
+    except Exception as exc:
+        return None, f"grading raised: {type(exc).__name__}: {exc}"
+    if grade_result.grading_error:
+        return None, f"grading failed: {grade_result.grading_error}"
+    if not grade_result.criteria_results:
+        return None, "grading returned no criteria"
+    failed_criteria = [
+        cr for cr in grade_result.criteria_results if cr.get("grading_success") is False
+    ]
+    if failed_criteria:
+        labels = [
+            str(cr.get("criterion_key") or cr.get("criteria") or "<unknown>")
+            for cr in failed_criteria[:5]
+        ]
+        suffix = "" if len(failed_criteria) <= 5 else f" (+{len(failed_criteria) - 5} more)"
+        return None, f"grading failed for criterion call(s): {labels}{suffix}"
+
+    # --- Attach per-criterion autorating into the rubric for score_summary ---
+    rubric_dict = json.loads(task.rubric_json)
+    if isinstance(rubric_dict, list):
+        rubric_flat: dict = {}
+        for entry in rubric_dict:
+            if isinstance(entry, dict):
+                rubric_flat.update(entry)
+        rubric_dict = rubric_flat
+    for cr in grade_result.criteria_results:
+        key = cr.get("criterion_key")
+        if isinstance(key, str) and key in rubric_dict and isinstance(rubric_dict[key], dict):
+            rubric_dict[key]["autorating"] = bool(cr.get("autorating"))
+            rubric_dict[key]["reason"] = cr.get("reason", "")
+
+    elapsed = time.time() - started
+
+    # Agent token usage is copied from the provider response as surfaced by
+    # LiteLLM through the vendored harness. Cost is intentionally omitted:
+    # this path only exposes LiteLLM's local price-map estimate, not an exact
+    # provider-billed charge. Judge usage is also omitted because it is shared
+    # evaluation overhead, not a model-output metric for these comparisons.
+    usage_fields = _agent_usage_fields(gen_row, gen_result)
+
+    row = {
+        "task_id": task.task_id,
+        "domain": task.domain,
+        "status": "completed",
+        f"{prefix}_response": response,
+        f"{prefix}_score": round(grade_result.percentage_score, 2),
+        f"{prefix}_score_summary": json.dumps(rubric_dict, ensure_ascii=False),
+        "generation_chars": len(response),
+        "wall_time_seconds": round(elapsed, 2),
+        "attachments_expected": len(task.attachments),
+        "attachments_sent": len(attachments),
+        "parsed_attachment_chars": len(parsed_attachments),
+        "final_prompt_chars": len(final_prompt),
+        "final_prompt_sha256": _sha256_text(final_prompt),
+        **usage_fields,
+        "judge_model": judge.model_id,
+        "test_model_profile": profile.name,
+        "test_model_id": profile.model_id,
+    }
+    return "completed", row
+
+
+# -----------------------------------------------------------------------------
+# Filter + order tasks
+# -----------------------------------------------------------------------------
+
+
+def _select_tasks(all_tasks: list[Task], opts: RunOptions) -> list[Task]:
+    """Apply --task-ids / --domain / --start-index / --limit, in upstream order.
+
+    Upstream applies domain → start_index/limit. We add `--task-ids` as the
+    most-explicit override; when given it takes precedence over domain
+    filtering and ordering.
+    """
+    if opts.task_ids:
+        wanted = set(opts.task_ids)
+        # Preserve dataset order, but only keep wanted ids
+        return [t for t in all_tasks if t.task_id in wanted]
+
+    pool = all_tasks
+    if opts.domain:
+        pool = [t for t in pool if t.domain == opts.domain]
+    end = len(pool) if opts.limit is None else opts.start_index + opts.limit
+    return pool[opts.start_index : end]
+
+
+# -----------------------------------------------------------------------------
+# Stats — direct port of upstream calculate_stats(), at run_with_hf.py:196-252
+# -----------------------------------------------------------------------------
+
+
+def calculate_stats(output_csv: Path, model_key: str) -> dict:
+    """Per-domain + overall mean of per-task scores. NUMBER_OF_RUNS=1, so the
+    per-task median across runs is just the single run's score."""
+    if not output_csv.is_file():
+        return {}
+    with output_csv.open(encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if r.get("status") == "completed"]
+    if not rows:
+        return {}
+
+    domain_scores: dict[str, list[float]] = {}
+    all_scores: list[float] = []
+    score_col = f"{model_key}_1_score"
+    for r in rows:
+        try:
+            s = float(r.get(score_col, 0) or 0)
+        except (TypeError, ValueError):
+            s = 0.0
+        domain_scores.setdefault(r.get("domain", "Unknown"), []).append(s)
+        all_scores.append(s)
+
+    return {
+        "total_completed": len(rows),
+        "overall_mean": round(statistics.mean(all_scores), 2) if all_scores else 0.0,
+        "by_domain": {
+            d: {"n": len(scores), "mean": round(statistics.mean(scores), 2)}
+            for d, scores in sorted(domain_scores.items())
+        },
+    }
+
+
+# -----------------------------------------------------------------------------
+# Driver
+# -----------------------------------------------------------------------------
+
+
+def run(opts: RunOptions) -> dict:
+    """Synchronous entry point used by the CLI."""
+    return asyncio.run(run_async(opts))
+
+
+async def run_async(opts: RunOptions) -> dict:
+    validate(opts.dataset_dir)
+
+    # Ensure vendor's parser registry is initialised before any GenerationTask.
+    # (Importing the parser package runs initialize_parsers(); we import it
+    # here so a fresh `apex-bench run` doesn't depend on prior imports.)
+    with vendor_cwd():
+        import parser  # noqa: F401 — side-effect: registers ReductoParser
+
+    response_template = _read_response_generation_template()
+    grading_template_path = _grading_template_path()
+
+    all_tasks = load_tasks(opts.dataset_dir)
+    selected = _select_tasks(all_tasks, opts)
+    if not selected:
+        log.warning("no tasks matched filters; nothing to run")
+        return {"total_completed": 0, "overall_mean": 0.0, "by_domain": {}}
+
+    # Resume — skip tasks already completed in the same output CSV
+    completed = load_completed_task_ids(opts.output_csv)
+    pending = [t for t in selected if t.task_id not in completed]
+    log.info(
+        "selected=%d already_completed=%d pending=%d", len(selected), len(completed), len(pending)
+    )
+
+    model_key = sanitize_model_key(opts.profile.model_id)
+    headers = csv_headers(model_key)
+    write_manifest(
+        opts.output_csv,
+        build_run_manifest(opts, selected, pending, headers, status="starting"),
+    )
+    try:
+        _preflight_credentials(opts, pending)
+    except RuntimeError as exc:
+        append_failure(
+            opts.output_csv,
+            {
+                "scope": "run",
+                "status": "failed_preflight",
+                "profile": opts.profile.name,
+                "model_id": opts.profile.model_id,
+                "judge_model": opts.judge.model_id,
+                "error": str(exc),
+            },
+        )
+        write_manifest(
+            opts.output_csv,
+            build_run_manifest(opts, selected, pending, headers, status="failed_preflight"),
+        )
+        raise
+
+    saved = 0
+    skipped = 0
+    for idx, task in enumerate(pending, start=1):
+        log.info(
+            "[%d/%d] task_id=%s domain=%s profile=%s",
+            idx,
+            len(pending),
+            task.task_id,
+            task.domain,
+            opts.profile.name,
+        )
+        try:
+            status, payload = await _process_task(
+                task,
+                opts.profile,
+                opts.judge,
+                response_template,
+                grading_template_path,
+            )
+        except KeyboardInterrupt:
+            log.warning("interrupted; %d tasks completed before stop", saved)
+            raise
+        if status is None or not isinstance(payload, dict):
+            log.error("task %s SKIPPED: %s", task.task_id, payload)
+            append_failure(
+                opts.output_csv,
+                {
+                    "scope": "task",
+                    "status": "skipped",
+                    "task_id": task.task_id,
+                    "domain": task.domain,
+                    "profile": opts.profile.name,
+                    "model_id": opts.profile.model_id,
+                    "judge_model": opts.judge.model_id,
+                    "error": str(payload),
+                },
+            )
+            skipped += 1
+            continue
+        append_row(opts.output_csv, headers, payload)
+        saved += 1
+        log.info(
+            "[%d/%d] task_id=%s score=%.1f%%",
+            idx,
+            len(pending),
+            task.task_id,
+            payload[f"{model_key}_1_score"],
+        )
+
+    stats = calculate_stats(opts.output_csv, model_key)
+    log.info(
+        "run complete: saved=%d skipped=%d overall_mean=%.2f%%",
+        saved,
+        skipped,
+        stats.get("overall_mean", 0.0),
+    )
+    write_manifest(
+        opts.output_csv,
+        build_run_manifest(
+            opts,
+            selected,
+            pending,
+            headers,
+            status="complete",
+            saved=saved,
+            skipped=skipped,
+            stats=stats,
+        ),
+    )
+    return stats

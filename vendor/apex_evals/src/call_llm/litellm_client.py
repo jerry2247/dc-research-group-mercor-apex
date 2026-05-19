@@ -62,6 +62,7 @@ class LiteLLMClient(BaseLLMProvider):
             "gpt-5.1",
             "gpt-5.2",
             "gpt-5.2-pro",
+            "gpt-5.5",  # vendored-patch: GPT-5.5 (released 2026-04-24) post-dates upstream pin; see vendor/apex_evals/PATCHES.md
         ],
 
         # Anthropic models (Claude)
@@ -99,6 +100,7 @@ class LiteLLMClient(BaseLLMProvider):
             "grok-beta",
             "grok-code-fast-1",
             "grok-4-0709",
+            "grok-4.3",  # vendored-patch: Grok 4.3 (released May 2026) post-dates upstream pin; see vendor/apex_evals/PATCHES.md
             "grok-3",
             "grok-3-mini",
             "grok-3-mini-beta"

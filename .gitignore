@@ -1,0 +1,56 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+build/
+dist/
+pip-wheel-metadata/
+
+# --- Virtualenvs ------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# --- Secrets ----------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Data, runs, caches (intentionally not version-controlled) --------------
+data/
+runs/
+catalog/
+results/
+*.csv
+!tests/**/*.csv
+!docs/**/*.csv
+
+# --- Editor / OS ------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Jupyter ----------------------------------------------------------------
+.ipynb_checkpoints/
+*.ipynb_meta
+
+# --- Vendored harness's own ephemera ----------------------------------------
+# We vendor source, not artifacts.
+vendor/apex_evals/.venv/
+vendor/apex_evals/**/__pycache__/
+vendor/apex_evals/**/*.egg-info/
+vendor/apex_evals/build/
+vendor/apex_evals/dist/
