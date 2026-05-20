@@ -1,0 +1,49 @@
+{
+  "attachments_per_task": {
+    "max": 9,
+    "mean": 1.76,
+    "median": 1,
+    "min": 1,
+    "n": 100,
+    "p25": 1,
+    "p75": 2
+  },
+  "dataset_dir": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/data/APEX-v1-extended",
+  "domains": {
+    "Consulting": 25,
+    "Finance": 25,
+    "Legal": 25,
+    "Medicine": 25
+  },
+  "generated_at": null,
+  "prompt_chars": {
+    "max": 5239,
+    "mean": 1493.39,
+    "median": 1276,
+    "min": 197,
+    "n": 100,
+    "p25": 842,
+    "p75": 1980
+  },
+  "rubric_chars": {
+    "max": 28369,
+    "mean": 11256.98,
+    "median": 10810,
+    "min": 3552,
+    "n": 100,
+    "p25": 8350,
+    "p75": 13678
+  },
+  "rubric_criteria": {
+    "max": 25,
+    "mean": 11.4,
+    "median": 10,
+    "min": 5,
+    "n": 100,
+    "p25": 8,
+    "p75": 14
+  },
+  "tasks_with_attachments": 100,
+  "tasks_with_missing_attachments": 0,
+  "total_tasks": 100
+}

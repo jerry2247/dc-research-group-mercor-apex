@@ -1,19 +1,28 @@
 # Pre-commit hooks. Run on every commit; fail fast.
 # Install with: pre-commit install (after `make setup`).
+#
+# Excluded paths:
+#   vendor/  -- Mercor's harness; never modify
+#   data/    -- Mercor's APEX-v1-extended dataset; verbatim, must not be
+#               whitespace-fixed or newline-fixed (would change content
+#               and invalidate dataset_csv_sha256 in run manifests).
+#   runs/    -- our benchmark outputs (results.csv, manifests, failures);
+#               data not source. Never auto-edit.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^vendor/
+        exclude: ^(vendor|data|runs)/
       - id: end-of-file-fixer
-        exclude: ^vendor/
+        exclude: ^(vendor|data|runs)/
       - id: check-yaml
-        exclude: ^vendor/
+        exclude: ^(vendor|data)/
       - id: check-toml
         exclude: ^vendor/
       - id: check-added-large-files
         args: ["--maxkb=512"]
+        exclude: ^(vendor|data|runs)/
       - id: check-merge-conflict
       - id: detect-private-key
 
