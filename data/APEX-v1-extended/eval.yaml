@@ -1,0 +1,13 @@
+name: APEX
+description: >
+  APEX assesses whether frontier models are capable of performing
+  economically valuable tasks across four jobs: investment banking
+  associate, management consultant, big law associate, and primary
+  care physician (MD). 400 test cases (100 per job), graded using
+  a Judge LM. Created by experts from Goldman Sachs, McKinsey,
+  Latham & Watkins, and leading medical institutions.
+evaluation_framework: apex-evals
+tasks:
+  - id: apex-v1
+    config: default
+    split: train

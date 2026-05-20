@@ -26,14 +26,21 @@ ENV/
 .env.*
 !.env.example
 
-# --- Data, runs, caches (intentionally not version-controlled) --------------
-data/
-runs/
-catalog/
-results/
-*.csv
-!tests/**/*.csv
-!docs/**/*.csv
+# --- Data and runs ----------------------------------------------------------
+# Everything under data/ and runs/ is tracked so collaborators can audit and
+# reproduce findings:
+#   - data/APEX-v1-extended/ -- the benchmark dataset, fetched from
+#     mercor/APEX-v1-extended (CC-BY-4.0; see docs/REPRODUCIBILITY.md)
+#   - data/catalog.json      -- our generated dataset characterization
+#   - runs/<dir>/results.csv -- one row per completed task with response,
+#                               score, per-criterion judge rationales, and
+#                               audit telemetry
+#   - runs/<dir>/results.run_manifest.json   -- per-run reproducibility
+#                               manifest (apex-bench version, repo HEAD,
+#                               vendor commit SHA, prompt template SHA256s,
+#                               dataset CSV SHA256, profile + judge config)
+#   - runs/<dir>/results.failures.jsonl       -- skipped-task record
+#   - runs/smoke/<id>/result.json             -- single-task smoke artifacts
 
 # --- Editor / OS ------------------------------------------------------------
 .DS_Store
