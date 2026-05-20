@@ -155,7 +155,18 @@ for _effort in ("low", "medium", "high", "xhigh"):
             max_tokens=127_997,
             max_input_tokens=272_000,
             temperature=1.0,
-            model_configs={"reasoning_effort": _effort, "verbosity": "medium"},
+            model_configs={
+                "reasoning_effort": _effort,
+                "verbosity": "medium",
+                # 1800s (30 min) per LLM call. The vendor's
+                # map_parameters_for_litellm forwards model_configs into
+                # acompletion(**params) verbatim, and LiteLLM accepts
+                # `timeout` as a top-level kwarg. Without this, LiteLLM
+                # applies its own 600s default, which is too short for
+                # reasoning-effort=high on very large parsed-attachment
+                # prompts (observed timing out on the Finance domain).
+                "timeout": 1800,
+            },
             notes=f"OpenAI GPT-5.5, reasoning_effort={_effort}, verbosity=medium.",
         )
     )
@@ -180,7 +191,14 @@ for _effort in ("low", "medium", "high"):
             max_tokens=256_000,
             max_input_tokens=256_000,
             temperature=0.8,
-            model_configs={"reasoning_effort": _effort},
+            model_configs={
+                "reasoning_effort": _effort,
+                # 1800s (30 min) per LLM call. See the gpt-5.5 block above
+                # for rationale; the same LiteLLM default (600s) was too
+                # short for reasoning-effort=high on large parsed-attachment
+                # prompts observed during the Finance domain run.
+                "timeout": 1800,
+            },
             notes=f"xAI Grok 4.3, reasoning_effort={_effort}, temperature=0.8.",
         )
     )
