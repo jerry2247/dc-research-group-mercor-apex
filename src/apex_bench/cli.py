@@ -523,6 +523,24 @@ def run(
         min=0,
         help="Top-k per retrieval axis when the memory subsystem is on.",
     ),
+    trace: bool = typer.Option(
+        False,
+        "--trace/--no-trace",
+        help="Enable the TRACE (uses-ground-truth) subsystem. Default: off. "
+        "Mutually exclusive with --memory. When on, each task is "
+        "preceded by a dual-embedding retrieval into the per-domain "
+        "cheatsheet; the agent emits a <citations>[...] tag stripped "
+        "before grading; after grading the boolean criteria_passed==total "
+        "is threaded into a reflector + curator pair (both same model as "
+        "the agent) that emit <cheatsheet_updates> ops applied to the "
+        "ledger. See docs/TRACE_PRD.md.",
+    ),
+    trace_top_k: int = typer.Option(
+        5,
+        "--trace-top-k",
+        min=0,
+        help="Top-k per retrieval axis when TRACE is on.",
+    ),
 ) -> None:
     """Run the APEX baseline on a slice of tasks. ONE run per (task, model).
 
@@ -540,6 +558,13 @@ def run(
 
     from apex_bench.memory.config import DynamicLedgerConfig
     from apex_bench.runner import JudgeOverride, RunOptions
+    from apex_bench.trace.config import TraceConfig
+
+    if memory and trace:
+        console.print(
+            "[red]error:[/red] --memory and --trace are mutually exclusive; pick one."
+        )
+        raise typer.Exit(code=2)
     from apex_bench.runner import run as run_runner
     from apex_bench.test_models import get_profile
 
@@ -582,6 +607,10 @@ def run(
         memory=DynamicLedgerConfig(
             enabled=memory,
             top_k_per_axis=dynamic_ledger_top_k,
+        ),
+        trace=TraceConfig(
+            enabled=trace,
+            top_k_per_axis=trace_top_k,
         ),
     )
 

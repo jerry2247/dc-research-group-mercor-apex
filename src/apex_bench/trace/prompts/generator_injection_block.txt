@@ -1,0 +1,32 @@
+## Strategy cheatsheet from prior cases in this area
+
+Below is a cheatsheet of ATOMIC STRATEGY BULLETS curated from prior
+cases on structurally similar problems. Each bullet captures a
+procedure, framework, convention, definitional pitfall, or output-
+format requirement worth knowing for this kind of case. Bullets carry
+usage counters: `helpful` is how often the bullet was cited on a
+case that was judged correct, `harmful` is how often it was cited on
+an incorrect case, `usage` is the total cite count.
+
+You may consult any bullet that applies. Do NOT copy specific
+numerical values, named entities, file paths, or named references
+from a bullet — values in bullets are illustrative; the current case
+has different actual ones. Use each bullet as a methodology to
+execute on the current case's actual data.
+
+{bullets_block}
+
+When you have completed the deliverable, on the LAST line of your
+response, list the `bullet_id` of every bullet you actually consulted
+during the work, in this exact format:
+
+    <citations>[bullet-1, bullet-7]</citations>
+
+If you consulted no bullets, write:
+
+    <citations>[]</citations>
+
+The citations line is internal bookkeeping; it is stripped from the
+deliverable before the rubric is applied.
+
+---

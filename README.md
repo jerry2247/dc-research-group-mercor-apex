@@ -36,7 +36,33 @@ see [`docs/AUDIT.md`](docs/AUDIT.md).
 
 ---
 
-## memory subsystem — our extension
+## Memory subsystems — memory subsystem & TRACE
+
+This repository ships two test-time-learning subsystems layered on the
+baseline Mercor harness. Both are off by default; pick at most one per
+run.
+
+| Subsystem            | CLI flag             | Uses GT? | Spec                                                |
+|----------------------|----------------------|----------|-----------------------------------------------------|
+| **memory subsystem**   | `--memory`   | No       | [`docs/DYNAMIC_LEDGER_PRD.md`](docs/DYNAMIC_LEDGER_PRD.md) |
+| **TRACE**            | `--trace`            | Yes (boolean `percentage_score >= 99.0`) | [`docs/TRACE_PRD.md`](docs/TRACE_PRD.md) |
+
+Both subsystems share the same retrieval (dual top-k cosine on
+`text-embedding-3-large`), per-domain isolation, create-time
+cosine-block dedup, and per-task snapshot discipline. They differ in:
+
+- **TRACE** uses two LLM calls (reflector → curator) and threads the
+  boolean correctness bit into both — per the TRACE paper. The
+  generator cites bullets at the end of its prose; citations bump
+  per-bullet `helpful` / `harmful` / `usage` counters that condition
+  future edits.
+- **memory subsystem** uses a single curator call with NO ground-truth
+  signal.
+
+Curator (and TRACE's reflector) run on the **same model** as the
+selected agent profile — only the judge model is fixed at gpt-5.5.
+
+## memory subsystem — no-ground-truth extension
 
 The contribution this repository carries beyond the baseline harness
 is **memory subsystem**: a no-ground-truth, per-domain, dual-retrieval
