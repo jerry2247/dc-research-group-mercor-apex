@@ -21,9 +21,10 @@ Project policies (these are NOT knobs):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from apex_bench.dynamic_ledger.config import DynamicLedgerConfig
 from apex_bench.paths import default_dataset_dir, runs_dir
 
 # --- Policy defaults (do not change casually) --------------------------------
@@ -87,6 +88,11 @@ class Settings:
     judge: JudgeConfig
     parsing_method: str = DEFAULT_PARSING_METHOD
     cache_parsed_documents: bool = DEFAULT_CACHE_PARSED_DOCUMENTS
+    dynamic_ledger: DynamicLedgerConfig = field(default_factory=DynamicLedgerConfig)
+    """Dynamic Ledger (no-GT) settings. Default disabled — when off,
+    the runner does not import any Dynamic Ledger module and the CSV
+    schema is byte-identical to the baseline. See
+    ``docs/DYNAMIC_LEDGER_PRD.md``."""
 
     @classmethod
     def defaults(cls) -> Settings:
@@ -103,6 +109,7 @@ class Settings:
             judge=self.judge,
             parsing_method=self.parsing_method,
             cache_parsed_documents=self.cache_parsed_documents,
+            dynamic_ledger=self.dynamic_ledger,
         )
 
     def with_judge(self, judge: JudgeConfig) -> Settings:
@@ -112,4 +119,15 @@ class Settings:
             judge=judge,
             parsing_method=self.parsing_method,
             cache_parsed_documents=self.cache_parsed_documents,
+            dynamic_ledger=self.dynamic_ledger,
+        )
+
+    def with_dynamic_ledger(self, dynamic_ledger: DynamicLedgerConfig) -> Settings:
+        return Settings(
+            dataset_dir=self.dataset_dir,
+            runs_dir=self.runs_dir,
+            judge=self.judge,
+            parsing_method=self.parsing_method,
+            cache_parsed_documents=self.cache_parsed_documents,
+            dynamic_ledger=dynamic_ledger,
         )
