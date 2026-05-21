@@ -50,6 +50,7 @@ from apex_bench.dataset import Task, csv_path, load_tasks, validate
 from apex_bench.dynamic_ledger.config import DynamicLedgerConfig
 from apex_bench.paths import repo_root, vendor_dir
 from apex_bench.test_models import TestModelProfile
+from apex_bench.trace.config import TraceConfig
 from apex_bench.vendor_imports import vendor_cwd
 
 log = logging.getLogger(__name__)
@@ -120,15 +121,16 @@ class RunOptions:
     task_ids: tuple[str, ...] | None = None
     start_index: int = 0
     limit: int | None = None
-    dynamic_ledger: DynamicLedgerConfig = field(  # forward ref
-        default_factory=lambda: __import__(
-            "apex_bench.dynamic_ledger.config", fromlist=["DynamicLedgerConfig"]
-        ).DynamicLedgerConfig()
-    )
+    dynamic_ledger: DynamicLedgerConfig = field(default_factory=DynamicLedgerConfig)
     """Dynamic Ledger (no-GT) configuration. When ``enabled=False``
     (default) the runner takes the baseline code path and the CSV schema
     is byte-identical to the no-ledger shape. See
     ``docs/DYNAMIC_LEDGER_PRD.md``."""
+
+    trace: TraceConfig = field(default_factory=TraceConfig)
+    """TRACE (uses-GT) configuration. Mutually exclusive with the
+    Dynamic Ledger — at most one of ``dynamic_ledger.enabled`` and
+    ``trace.enabled`` may be True per run. See ``docs/TRACE_PRD.md``."""
 
 
 @dataclass(frozen=True)
@@ -157,6 +159,35 @@ def sanitize_model_key(model_id: str) -> str:
     return model_id.replace("-", "_").replace(".", "_").replace("/", "_")
 
 
+_TRACE_CSV_COLUMNS = (
+    "trace_enabled",
+    "trace_snapshot_index_before",
+    "retrieved_bullet_count",
+    "retrieved_bullet_ids",
+    "citations_present",
+    "citations_count",
+    "citations_malformed_count",
+    "trailing_chars_after_citations",
+    "gt_correct_bit",
+    "reflector_proposal_count",
+    "curator_create_count",
+    "curator_create_blocked_count",
+    "curator_update_count",
+    "curator_delete_count",
+    "curator_consolidate_count",
+    "curator_no_op",
+    "trace_active_bullet_count_after",
+    "trace_total_bullet_count_after",
+    "trace_total_active_chars_after",
+    "reflector_prompt_tokens",
+    "reflector_completion_tokens",
+    "reflector_wall_seconds",
+    "curator_prompt_tokens",
+    "curator_completion_tokens",
+    "curator_wall_seconds",
+)
+
+
 _DYNAMIC_LEDGER_CSV_COLUMNS = (
     "dynamic_ledger_enabled",
     "dynamic_ledger_snapshot_index_before",
@@ -175,7 +206,12 @@ _DYNAMIC_LEDGER_CSV_COLUMNS = (
 )
 
 
-def csv_headers(model_key: str, *, with_dynamic_ledger: bool = False) -> list[str]:
+def csv_headers(
+    model_key: str,
+    *,
+    with_dynamic_ledger: bool = False,
+    with_trace: bool = False,
+) -> list[str]:
     """Per-task row schema. Preserves upstream's shape, adds audit columns.
 
     Columns we inherit from upstream (`run_with_hf.py:55-61`):
@@ -215,8 +251,12 @@ def csv_headers(model_key: str, *, with_dynamic_ledger: bool = False) -> list[st
             "test_model_id",
         ]
     )
+    if with_dynamic_ledger and with_trace:
+        raise ValueError("with_dynamic_ledger and with_trace are mutually exclusive")
     if with_dynamic_ledger:
         base.extend(_DYNAMIC_LEDGER_CSV_COLUMNS)
+    if with_trace:
+        base.extend(_TRACE_CSV_COLUMNS)
     return base
 
 
@@ -540,6 +580,7 @@ async def _process_task(
     grading_template_path: str,
     *,
     dynamic_ledger_runtime: Any | None = None,  # type: DynamicLedgerRuntime | None
+    trace_runtime: Any | None = None,  # type: TraceRuntime | None
 ) -> tuple[str, dict] | tuple[None, str]:
     """Generate and grade one task. Returns (status, row_dict) or (None, error).
 
@@ -618,6 +659,37 @@ async def _process_task(
         if retrieved_entries:
             augmented_user_prompt = augment_user_prompt(task.prompt, entries=retrieved_entries)
 
+    # --- TRACE Hook A: retrieve + augment user prompt ----------------------
+    trace_csv: dict[str, Any] = {}
+    retrieved_bullets: list[Any] = []
+    trace_snapshot_index_before = 0
+    if trace_runtime is not None:
+        from apex_bench.trace import augment_user_prompt as trace_augment
+        from apex_bench.trace import retrieve as trace_retrieve
+        from apex_bench.trace.runtime import trace_csv_fragment_empty
+
+        trace_csv = trace_csv_fragment_empty()
+        tstore = trace_runtime.store_for(task.domain)
+        trace_snapshot_index_before = trace_runtime.next_ordinal.get(task.domain, 0)
+        trace_csv["trace_snapshot_index_before"] = trace_snapshot_index_before
+        try:
+            q_emb = trace_runtime.embed.embed([task.prompt])[0]
+            retrieved_bullets = trace_retrieve(
+                tstore, query_embedding=q_emb, k=trace_runtime.cfg.top_k_per_axis
+            )
+        except Exception as exc:
+            log.warning(
+                "trace: retrieval failed for task=%s domain=%s (%s); proceeding without retrieval",
+                task.task_id,
+                task.domain,
+                exc,
+            )
+            retrieved_bullets = []
+        trace_csv["retrieved_bullet_count"] = len(retrieved_bullets)
+        trace_csv["retrieved_bullet_ids"] = json.dumps([b.bullet_id for b in retrieved_bullets])
+        if retrieved_bullets:
+            augmented_user_prompt = trace_augment(task.prompt, bullets=retrieved_bullets)
+
     # --- Build prompt + attachments (same as upstream) ---
     prompt = response_template.replace("{{Domain}}", task.domain).replace(
         "{{Prompt}}", augmented_user_prompt
@@ -661,10 +733,23 @@ async def _process_task(
     gen_row = gen_result.results[0]
     response = gen_row.get("response", "") or ""
 
-    # No citations machinery: the grader reads the response as the model
-    # generated it. The Dynamic Ledger does not rewrite the deliverable.
+    # The Dynamic Ledger does not rewrite the deliverable. TRACE parses
+    # and strips a `<citations>` tag on the last line of the response.
+    cited_bullet_ids: list[str] = []
+    response_for_grading = response
+    if trace_runtime is not None:
+        from apex_bench.trace import extract_and_strip_citations
 
-    if not response.strip():
+        extract = extract_and_strip_citations(response)
+        trace_csv["citations_present"] = extract.citations_present
+        trace_csv["citations_count"] = len(extract.cited_bullet_ids)
+        trace_csv["citations_malformed_count"] = extract.citations_malformed_count
+        trace_csv["trailing_chars_after_citations"] = extract.trailing_chars_after_citations
+        cited_bullet_ids = list(extract.cited_bullet_ids)
+        if extract.citations_present:
+            response_for_grading = extract.stripped_response
+
+    if not response_for_grading.strip():
         return None, "generation returned empty response"
     if not task.rubric_json.strip():
         return None, "task has empty rubric — skip"
@@ -690,7 +775,7 @@ async def _process_task(
     )
     # Pass the PATH (not the content) -- see _grading_template_path() for why.
     grading_task = GradingTask(
-        solution=response,
+        solution=response_for_grading,
         rubric=task.rubric_json,
         grading_model=judge_cfg,
         grading_prompt_template=grading_template_path,
@@ -819,6 +904,99 @@ async def _process_task(
         )
         row.update(dynamic_ledger_csv)
 
+    # --- TRACE Hook B: bump counters, reflect, curate, apply, persist ------
+    if trace_runtime is not None:
+        from apex_bench.trace import (
+            apply_ops as trace_apply_ops,
+        )
+        from apex_bench.trace import (
+            curate as trace_curate,
+        )
+        from apex_bench.trace import (
+            reflect as trace_reflect,
+        )
+
+        tstore = trace_runtime.store_for(task.domain)
+        gt_correct = grade_result.percentage_score >= 99.0
+        trace_csv["gt_correct_bit"] = gt_correct
+        trace_runtime.record_citations(task.domain, cited=cited_bullet_ids, gt_correct=gt_correct)
+        ordinal = trace_runtime.current_ordinal_for(task.domain)
+        try:
+            refl = trace_reflect(
+                tstore,
+                task.prompt,
+                response_for_grading,
+                cited_bullet_ids,
+                gt_correct,
+                cfg=trace_runtime.cfg,
+            )
+            trace_csv["reflector_proposal_count"] = len(refl.proposals)
+            trace_csv["reflector_prompt_tokens"] = refl.prompt_tokens
+            trace_csv["reflector_completion_tokens"] = refl.completion_tokens
+            trace_csv["reflector_wall_seconds"] = refl.wall_seconds
+
+            cur = trace_curate(
+                tstore,
+                task.prompt,
+                response_for_grading,
+                cited_bullet_ids,
+                gt_correct,
+                refl.proposals,
+                cfg=trace_runtime.cfg,
+            )
+            stats = trace_apply_ops(
+                store=tstore,
+                ops=cur.ops,
+                retrieved=retrieved_bullets,
+                embed=trace_runtime.embed,
+                cfg=trace_runtime.cfg,
+                current_ordinal=ordinal,
+            )
+            trace_runtime.persist(task.domain)
+            trace_runtime.snapshot_stores[task.domain].append_curator_log(
+                {
+                    "task_id": task.task_id,
+                    "ordinal": ordinal,
+                    "gt_correct": gt_correct,
+                    "reflector_proposals": len(refl.proposals),
+                    "create": stats.create_committed,
+                    "create_blocked": stats.create_blocked,
+                    "update": stats.update,
+                    "delete": stats.delete,
+                    "consolidate": stats.consolidate,
+                    "no_op": stats.no_op,
+                    "reflector_parse_error": refl.parse_error,
+                    "curator_parse_error": cur.parse_error,
+                    "reflector_prompt_tokens": refl.prompt_tokens,
+                    "reflector_completion_tokens": refl.completion_tokens,
+                    "reflector_wall_seconds": refl.wall_seconds,
+                    "curator_prompt_tokens": cur.prompt_tokens,
+                    "curator_completion_tokens": cur.completion_tokens,
+                    "curator_wall_seconds": cur.wall_seconds,
+                }
+            )
+            trace_csv["curator_create_count"] = stats.create_committed
+            trace_csv["curator_create_blocked_count"] = stats.create_blocked
+            trace_csv["curator_update_count"] = stats.update
+            trace_csv["curator_delete_count"] = stats.delete
+            trace_csv["curator_consolidate_count"] = stats.consolidate
+            trace_csv["curator_no_op"] = stats.no_op
+            trace_csv["curator_prompt_tokens"] = cur.prompt_tokens
+            trace_csv["curator_completion_tokens"] = cur.completion_tokens
+            trace_csv["curator_wall_seconds"] = cur.wall_seconds
+        except Exception as exc:
+            log.warning(
+                "trace: reflector/curator failed for task=%s domain=%s (%s); leaving ledger unchanged",
+                task.task_id,
+                task.domain,
+                exc,
+            )
+        active = tstore.active_bullets()
+        trace_csv["trace_active_bullet_count_after"] = len(active)
+        trace_csv["trace_total_bullet_count_after"] = len(tstore.bullets)
+        trace_csv["trace_total_active_chars_after"] = sum(len(b.content) for b in active)
+        row.update(trace_csv)
+
     return "completed", row
 
 
@@ -917,8 +1095,16 @@ async def run_async(opts: RunOptions) -> dict:
         "selected=%d already_completed=%d pending=%d", len(selected), len(completed), len(pending)
     )
 
+    if opts.dynamic_ledger.enabled and opts.trace.enabled:
+        raise ValueError(
+            "--dynamic-ledger and --trace are mutually exclusive; pick one memory subsystem."
+        )
     model_key = sanitize_model_key(opts.profile.model_id)
-    headers = csv_headers(model_key, with_dynamic_ledger=opts.dynamic_ledger.enabled)
+    headers = csv_headers(
+        model_key,
+        with_dynamic_ledger=opts.dynamic_ledger.enabled,
+        with_trace=opts.trace.enabled,
+    )
 
     # --- Dynamic Ledger: build per-run runtime (when enabled) ----------------
     dynamic_ledger_runtime: Any | None = None
@@ -998,27 +1184,18 @@ async def run_async(opts: RunOptions) -> dict:
         cfg_trace_in = opts.trace
         if cfg_trace_in.reflector_model is None or cfg_trace_in.curator_model is None:
             extra_args: dict[str, Any] = {}
-            # Flatten model_configs into kwargs so LiteLLM accepts them.
             if opts.profile.model_configs:
-                extra_args.update(opts.profile.model_configs)
+                extra_args["model_configs"] = dict(opts.profile.model_configs)
             if opts.profile.enable_thinking is not None:
                 extra_args["enable_thinking"] = opts.profile.enable_thinking
             if opts.profile.thinking_tokens is not None:
                 extra_args["thinking_tokens"] = opts.profile.thinking_tokens
-            # Prepend provider prefix when model_id is bare.
-            bare = opts.profile.model_id
-            routed_bare = bare if "/" in bare or not opts.profile.provider else f"{opts.profile.provider}/{bare}"
             cfg_trace_in = dataclasses.replace(
                 cfg_trace_in,
-                reflector_model=cfg_trace_in.reflector_model or routed_bare,
-                curator_model=cfg_trace_in.curator_model or routed_bare,
+                reflector_model=cfg_trace_in.reflector_model or opts.profile.model_id,
+                curator_model=cfg_trace_in.curator_model or opts.profile.model_id,
                 model_extra_args=extra_args or None,
             )
-        cfg_trace_in = dataclasses.replace(
-            cfg_trace_in,
-            reflector_model=route_model_id(cfg_trace_in.reflector_model, cfg=opts.azure),
-            curator_model=route_model_id(cfg_trace_in.curator_model, cfg=opts.azure),
-        )
 
         trace_runtime = TraceRuntime.create(
             cfg=cfg_trace_in,
@@ -1075,6 +1252,7 @@ async def run_async(opts: RunOptions) -> dict:
                 response_template,
                 grading_template_path,
                 dynamic_ledger_runtime=dynamic_ledger_runtime,
+                trace_runtime=trace_runtime,
             )
         except KeyboardInterrupt:
             log.warning("interrupted; %d tasks completed before stop", saved)

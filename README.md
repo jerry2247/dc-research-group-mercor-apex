@@ -36,7 +36,33 @@ see [`docs/AUDIT.md`](docs/AUDIT.md).
 
 ---
 
-## Dynamic Ledger — our extension
+## Memory subsystems — Dynamic Ledger & TRACE
+
+This repository ships two test-time-learning subsystems layered on the
+baseline Mercor harness. Both are off by default; pick at most one per
+run.
+
+| Subsystem            | CLI flag             | Uses GT? | Spec                                                |
+|----------------------|----------------------|----------|-----------------------------------------------------|
+| **Dynamic Ledger**   | `--dynamic-ledger`   | No       | [`docs/DYNAMIC_LEDGER_PRD.md`](docs/DYNAMIC_LEDGER_PRD.md) |
+| **TRACE**            | `--trace`            | Yes (boolean `percentage_score >= 99.0`) | [`docs/TRACE_PRD.md`](docs/TRACE_PRD.md) |
+
+Both subsystems share the same retrieval (dual top-k cosine on
+`text-embedding-3-large`), per-domain isolation, create-time
+cosine-block dedup, and per-task snapshot discipline. They differ in:
+
+- **TRACE** uses two LLM calls (reflector → curator) and threads the
+  boolean correctness bit into both — per the TRACE paper. The
+  generator cites bullets at the end of its prose; citations bump
+  per-bullet `helpful` / `harmful` / `usage` counters that condition
+  future edits.
+- **Dynamic Ledger** uses a single curator call with NO ground-truth
+  signal.
+
+Curator (and TRACE's reflector) run on the **same model** as the
+selected agent profile — only the judge model is fixed at gpt-5.5.
+
+## Dynamic Ledger — no-ground-truth extension
 
 The contribution this repository carries beyond the baseline harness
 is **Dynamic Ledger**: a no-ground-truth, per-domain, dual-retrieval
