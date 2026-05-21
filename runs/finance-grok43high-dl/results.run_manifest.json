@@ -1,0 +1,148 @@
+{
+  "apex_bench_version": "0.1.0",
+  "created_or_updated_at": "2026-05-21T21:58:50+00:00",
+  "dataset": {
+    "csv": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/data/APEX-v1-extended/data/train.csv",
+    "csv_sha256": "71b241d2884457534856a831b640a0e4de7734c9a8f46b7d35174ee4b74320c9",
+    "dir": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/data/APEX-v1-extended",
+    "domains": [
+      "Finance"
+    ],
+    "pending_tasks_at_start": 25,
+    "selected_tasks": 25,
+    "task_ids": [
+      "1588",
+      "2107",
+      "2108",
+      "2120",
+      "2121",
+      "2145",
+      "2157",
+      "2186",
+      "2192",
+      "2205",
+      "2217",
+      "2228",
+      "2230",
+      "2232",
+      "2261",
+      "2266",
+      "2269",
+      "2287",
+      "2288",
+      "2294",
+      "2302",
+      "2308",
+      "2315",
+      "2317",
+      "2333"
+    ]
+  },
+  "judge": {
+    "effective_temperature": 1.0,
+    "max_tokens": 32000,
+    "model_id": "gpt-5.5",
+    "requested_temperature": 1.0
+  },
+  "outputs": {
+    "csv": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/runs/finance-grok43high-dl/results.csv",
+    "failures_jsonl": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/runs/finance-grok43high-dl/results.failures.jsonl",
+    "headers": [
+      "task_id",
+      "domain",
+      "status",
+      "grok_4_3_1_response",
+      "grok_4_3_1_score",
+      "grok_4_3_1_score_summary",
+      "generation_chars",
+      "wall_time_seconds",
+      "attachments_expected",
+      "attachments_sent",
+      "parsed_attachment_chars",
+      "final_prompt_chars",
+      "final_prompt_sha256",
+      "agent_input_tokens",
+      "agent_output_tokens",
+      "agent_tokens",
+      "agent_usage_available",
+      "agent_usage_source",
+      "agent_usage_consistent",
+      "judge_model",
+      "test_model_profile",
+      "test_model_id",
+      "dynamic_ledger_enabled",
+      "dynamic_ledger_snapshot_index_before",
+      "retrieved_entry_count",
+      "retrieved_entry_ids",
+      "curator_create_count",
+      "curator_create_blocked_count",
+      "curator_update_count",
+      "curator_delete_count",
+      "dynamic_ledger_active_entry_count_after",
+      "dynamic_ledger_total_entry_count_after",
+      "dynamic_ledger_total_active_chars_after",
+      "curator_prompt_tokens",
+      "curator_completion_tokens",
+      "curator_wall_seconds"
+    ]
+  },
+  "progress": {
+    "saved_this_invocation": 25,
+    "skipped_this_invocation": 0,
+    "stats": {
+      "by_domain": {
+        "Finance": {
+          "mean": 50.02,
+          "n": 25
+        }
+      },
+      "overall_mean": 50.02,
+      "total_completed": 25
+    }
+  },
+  "repo": {
+    "dirty": true,
+    "dirty_status_short": [
+      "?? runs/archive/",
+      "?? runs/finance-grok43high-dl.log",
+      "?? runs/finance-grok43high-dl/",
+      "?? runs/finance-grok43high-rerun.log",
+      "?? runs/finance-grok43high-rerun/"
+    ],
+    "head": "a5ca533340c476c223e00159f714ee35a3cd24f3",
+    "root": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench"
+  },
+  "run_policy": {
+    "domain_filter": "Finance",
+    "limit": 25,
+    "runs_per_task": 1,
+    "start_index": 0,
+    "task_ids": []
+  },
+  "schema_version": 1,
+  "status": "complete",
+  "test_model": {
+    "model_config_kwargs": {
+      "max_input_tokens": 256000,
+      "max_tokens": 256000,
+      "model_configs": {
+        "reasoning_effort": "high",
+        "timeout": 1800
+      },
+      "model_id": "grok-4.3",
+      "number_of_runs": 1,
+      "temperature": 0.8
+    },
+    "model_id": "grok-4.3",
+    "profile": "grok-4.3-high",
+    "provider": "xai"
+  },
+  "vendor": {
+    "mercor_apex_evals_commit": "6cbf3f43156bf332329abe76ed4a695fc71ec5b0",
+    "path": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/vendor/apex_evals",
+    "prompt_template_sha256": {
+      "grading_prompt.txt": "0f126c1c033b5b409a49e36c564de5eca96f27e0b5103ce66a2edd581b638fbf",
+      "response_generation_prompt.txt": "277a118270a6c32a5a11d44a7c367333b42e4babc06b770e8b2aa8a73060d876"
+    }
+  }
+}
