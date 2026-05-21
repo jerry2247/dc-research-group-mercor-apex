@@ -506,6 +506,23 @@ def run(
     ),
     judge_temperature: float = typer.Option(DEFAULT_JUDGE_TEMPERATURE, "--judge-temperature"),
     judge_max_tokens: int = typer.Option(DEFAULT_JUDGE_MAX_TOKENS, "--judge-max-tokens", min=1024),
+    memory: bool = typer.Option(
+        False,
+        "--memory/--no-memory",
+        help="Enable the memory subsystem (no-ground-truth) subsystem. Default: "
+        "off. When on, each task is preceded by a dual-embedding retrieval "
+        "into the per-domain ledger; after grading, the curator examines the "
+        "work and emits <memory_updates> JSON ops that the wrapper applies to "
+        "the ledger. The curator runs on the same model as the selected "
+        "agent profile (only the judge is fixed at gpt-5.5). See "
+        "docs/DYNAMIC_LEDGER_PRD.md.",
+    ),
+    dynamic_ledger_top_k: int = typer.Option(
+        5,
+        "--memory-top-k",
+        min=0,
+        help="Top-k per retrieval axis when the memory subsystem is on.",
+    ),
 ) -> None:
     """Run the APEX baseline on a slice of tasks. ONE run per (task, model).
 
@@ -521,6 +538,7 @@ def run(
     """
     from datetime import datetime
 
+    from apex_bench.memory.config import DynamicLedgerConfig
     from apex_bench.runner import JudgeOverride, RunOptions
     from apex_bench.runner import run as run_runner
     from apex_bench.test_models import get_profile
@@ -561,6 +579,10 @@ def run(
         task_ids=ids_tuple,
         start_index=start_index,
         limit=limit,
+        memory=DynamicLedgerConfig(
+            enabled=memory,
+            top_k_per_axis=dynamic_ledger_top_k,
+        ),
     )
 
     console.print(
