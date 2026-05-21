@@ -541,6 +541,17 @@ def run(
         min=0,
         help="Top-k per retrieval axis when TRACE is on.",
     ),
+    azure: bool = typer.Option(
+        False,
+        "--azure/--no-azure",
+        help="Route GPT-5.5 chat completions (judge + test profile + memory subsystem "
+        "curator + TRACE reflector/curator) through Azure-OpenAI. "
+        "Requires AZURE_API_KEY (or AZURE_OPENAI_API_KEY), AZURE_API_BASE "
+        "(or AZURE_OPENAI_ENDPOINT), and AZURE_API_VERSION; the Azure "
+        "deployment name is AZURE_GPT55_DEPLOYMENT_NAME (default `gpt-5.5`). "
+        "The embedding model (text-embedding-3-large) is always served by "
+        "OpenAI regardless of this flag.",
+    ),
 ) -> None:
     """Run the APEX baseline on a slice of tasks. ONE run per (task, model).
 
@@ -556,6 +567,7 @@ def run(
     """
     from datetime import datetime
 
+    from apex_bench.azure_routing import AzureConfig
     from apex_bench.memory.config import DynamicLedgerConfig
     from apex_bench.runner import JudgeOverride, RunOptions
     from apex_bench.trace.config import TraceConfig
@@ -612,6 +624,7 @@ def run(
             enabled=trace,
             top_k_per_axis=trace_top_k,
         ),
+        azure=AzureConfig(enabled=azure),
     )
 
     console.print(
