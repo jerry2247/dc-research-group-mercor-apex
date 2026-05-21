@@ -187,3 +187,22 @@ apex-bench run \
     --trace \
     --output runs/trace-on/results.csv
 ```
+
+## Citation
+
+This subsystem implements the **TRACE** method (Tool-augmented
+Reasoning via Atomic Cheatsheet Editing) by Liao, Nair, and Yang,
+published as a Stanford CS224N final project. We follow the paper's
+reflector + curator pipeline with the adaptations enumerated above
+(OpenAI embeddings, no bullet length cap, no SFT step, same model for
+reflector + curator + generator, GT bit = `percentage_score >= 99.0`).
+
+```bibtex
+@misc{liao2025trace,
+  title  = {TRACE: Tool-augmented Reasoning via Atomic Cheatsheet Editing},
+  author = {Liao, ... and Nair, ... and Yang, ...},
+  year   = {2025},
+  note   = {Stanford CS224N project},
+  url    = {https://web.stanford.edu/class/cs224n/project.html}
+}
+```

@@ -165,14 +165,19 @@ al.'s published Dynamic Ledger spec.** Our extensions, documented in
 
 We report **Pass@1** (per-criterion score ≥ 99 %) and **mean
 percentage score** (Mercor's per-criterion average; 0 – 100). One run
-per (task, model). The Dynamic-Ledger-on column is intentionally empty
-pending the planned sweep; the baseline column is what's currently in
+per (task, model). Memory-subsystem columns are intentionally empty
+pending the planned sweeps; baseline data is what's currently in
 `runs/finance-grok43high/`.
 
 | Method | Finance (25 tasks) Pass@1 | Finance mean | Legal (25 tasks) | Consulting (25 tasks) | Medicine (25 tasks) |
 |---|---|---|---|---|---|
-| Baseline · grok-4.3-high · no ledger | **16.0 %** | **54.87** | _not yet run_ | _not yet run_ | _not yet run_ |
+| Baseline · grok-4.3-high · no memory | **16.0 %** | **54.87** | _not yet run_ | _not yet run_ | _not yet run_ |
 | Dynamic Ledger · grok-4.3-high · `--dynamic-ledger` | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| TRACE · grok-4.3-high · `--trace` | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+
+Method spec: [`docs/DYNAMIC_LEDGER_PRD.md`](docs/DYNAMIC_LEDGER_PRD.md)
+(no-GT) and [`docs/TRACE_PRD.md`](docs/TRACE_PRD.md) (uses-GT).
+Project-wide context: [`docs/PROJECT.md`](docs/PROJECT.md).
 
 ### Enabling the Dynamic Ledger
 

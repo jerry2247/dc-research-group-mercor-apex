@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from apex_bench import __version__
+from apex_bench.azure_routing import AzureConfig, route_model_id
 from apex_bench.config import (
     DEFAULT_JUDGE_MAX_TOKENS,
     DEFAULT_JUDGE_MODEL,
@@ -131,6 +132,14 @@ class RunOptions:
     """TRACE (uses-GT) configuration. Mutually exclusive with the
     Dynamic Ledger — at most one of ``dynamic_ledger.enabled`` and
     ``trace.enabled`` may be True per run. See ``docs/TRACE_PRD.md``."""
+
+    azure: AzureConfig = field(default_factory=AzureConfig)
+    """Azure-OpenAI routing for GPT-5.5 chat completions. When
+    ``enabled=True`` any ``gpt-5.5*`` model id (judge, test profile,
+    Dynamic Ledger curator, TRACE reflector/curator) is rewritten to
+    ``azure/<deployment_name>`` before reaching LiteLLM. The embedding
+    model (``text-embedding-3-large``) always uses OpenAI regardless
+    of this setting. See ``apex_bench/azure_routing.py``."""
 
 
 @dataclass(frozen=True)
@@ -526,6 +535,8 @@ def build_run_manifest(
 
 
 def _required_api_key(model_id: str, provider: str | None = None) -> str | None:
+    if provider == "azure" or model_id.startswith("azure/"):
+        return "AZURE_API_KEY"
     if provider == "xai" or model_id.startswith("xai/") or model_id.startswith("grok"):
         return "XAI_API_KEY"
     if provider == "openai" or model_id.startswith(("openai/", "gpt-", "o1", "o3", "o4")):
@@ -552,13 +563,25 @@ def _preflight_credentials(opts: RunOptions, selected: list[Task]) -> None:
         pass
 
     missing: list[str] = []
-    test_key = _required_api_key(opts.profile.model_id, opts.profile.provider)
-    judge_key = _required_api_key(opts.judge.model_id)
+    routed_test = route_model_id(opts.profile.model_id, cfg=opts.azure)
+    routed_judge = route_model_id(opts.judge.model_id, cfg=opts.azure)
+    test_key = _required_api_key(
+        routed_test,
+        "azure" if routed_test.startswith("azure/") else opts.profile.provider,
+    )
+    judge_key = _required_api_key(routed_judge)
     for key in (test_key, judge_key):
         if key and not os.environ.get(key) and key not in missing:
             missing.append(key)
     if any(t.attachments for t in selected) and not os.environ.get("REDUCTO_API_KEY"):
         missing.append("REDUCTO_API_KEY")
+    # Embeddings always go through OpenAI even when chat is routed to Azure.
+    if (
+        (opts.dynamic_ledger.enabled or opts.trace.enabled)
+        and not os.environ.get("OPENAI_API_KEY")
+        and "OPENAI_API_KEY" not in missing
+    ):
+        missing.append("OPENAI_API_KEY")
     if missing:
         raise RuntimeError(
             "missing required environment variable(s): "
@@ -581,6 +604,7 @@ async def _process_task(
     *,
     dynamic_ledger_runtime: Any | None = None,  # type: DynamicLedgerRuntime | None
     trace_runtime: Any | None = None,  # type: TraceRuntime | None
+    azure_cfg: AzureConfig | None = None,
 ) -> tuple[str, dict] | tuple[None, str]:
     """Generate and grade one task. Returns (status, row_dict) or (None, error).
 
@@ -712,8 +736,11 @@ async def _process_task(
     started = time.time()
 
     # --- Generate ---
+    azure_eff = azure_cfg or AzureConfig()
     try:
         gen_kwargs = profile.to_model_config_kwargs()
+        # Route the test-model id through Azure when enabled.
+        gen_kwargs["model_id"] = route_model_id(gen_kwargs["model_id"], cfg=azure_eff)
         gen_task = GenerationTask(
             prompt=prompt,
             models=[ModelConfig(**gen_kwargs)],
@@ -769,7 +796,7 @@ async def _process_task(
 
     # --- Grade ---
     judge_cfg = GradingModelConfig(
-        model_id=judge.model_id,
+        model_id=route_model_id(judge.model_id, cfg=azure_eff),
         max_tokens=judge.max_tokens,
         temperature=_safe_judge_temperature(judge.model_id, judge.temperature),
     )
@@ -1148,6 +1175,10 @@ async def run_async(opts: RunOptions) -> dict:
                 curator_model=routed_bare,
                 curator_extra_args=curator_extra or None,
             )
+        # Apply Azure routing AFTER profile fill-in so gpt-5.5 → azure.
+        cfg_in = dataclasses.replace(
+            cfg_in, curator_model=route_model_id(cfg_in.curator_model, cfg=opts.azure)
+        )
 
         dynamic_ledger_runtime = DynamicLedgerRuntime.create(
             cfg=cfg_in,
@@ -1196,6 +1227,11 @@ async def run_async(opts: RunOptions) -> dict:
                 curator_model=cfg_trace_in.curator_model or opts.profile.model_id,
                 model_extra_args=extra_args or None,
             )
+        cfg_trace_in = dataclasses.replace(
+            cfg_trace_in,
+            reflector_model=route_model_id(cfg_trace_in.reflector_model, cfg=opts.azure),
+            curator_model=route_model_id(cfg_trace_in.curator_model, cfg=opts.azure),
+        )
 
         trace_runtime = TraceRuntime.create(
             cfg=cfg_trace_in,
@@ -1253,6 +1289,7 @@ async def run_async(opts: RunOptions) -> dict:
                 grading_template_path,
                 dynamic_ledger_runtime=dynamic_ledger_runtime,
                 trace_runtime=trace_runtime,
+                azure_cfg=opts.azure,
             )
         except KeyboardInterrupt:
             log.warning("interrupted; %d tasks completed before stop", saved)
