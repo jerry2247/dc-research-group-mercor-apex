@@ -46,11 +46,11 @@ make fetch-dataset                                          # fetches mercor/APE
 
 # Baseline (no memory)
 apex-bench run --model grok-4.3-high --domain Finance --limit 25 \
-    --output runs/finance-grok43high/results.csv
+    --output runs/grok43high-baseline/results.csv
 
 # memory subsystem
 apex-bench run --model grok-4.3-high --domain Finance --limit 25 --memory \
-    --output runs/finance-grok43high-dl/results.csv
+    --output runs/grok43high-dl/results.csv
 ```
 
 Full setup (venv, API keys, dataset hashes) and the documented divergences from Mercor's published harness: [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md), [`docs/AUDIT.md`](docs/AUDIT.md).
@@ -64,8 +64,8 @@ Full setup (venv, API keys, dataset hashes) and the documented divergences from 
 | `src/apex_bench/trace/` | TRACE subsystem: reflector, curator, prompts |
 | `vendor/apex_evals/` | Mercor's evaluation harness, vendored at `6cbf3f43` |
 | `data/APEX-v1-extended/` | Mercor's benchmark CSV, fetched from `mercor/APEX-v1-extended` |
-| `runs/finance-grok43high/` | Baseline run, grok-4.3-high, Finance subset |
-| `runs/finance-grok43high-dl/` | memory subsystem run, same profile, same subset |
+| `runs/grok43high-baseline/` | Baseline run, grok-4.3-high, Finance subset |
+| `runs/grok43high-dl/` | memory subsystem run, same profile, same subset |
 | `docs/` | Architecture, PRDs, reproducibility, audit. Index: [`docs/INDEX.md`](docs/INDEX.md) |
 
 Behavioral fidelity to Mercor's published evaluation surface is enforced by pytest assertions and a code-level audit; see [`docs/AUDIT.md`](docs/AUDIT.md).
