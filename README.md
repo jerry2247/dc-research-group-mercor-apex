@@ -1,12 +1,12 @@
 # apex-bench
 
-Evaluation harness for **memory subsystem** and **TRACE** — two test-time-learning subsystems — on Mercor's **APEX-v1-extended** benchmark (single-shot, professional-services prose deliverables).
+Evaluation harness for **DC Retrieval Synthesis** and **TRACE** — two test-time-learning subsystems — on Mercor's **APEX-v1-extended** benchmark (single-shot, professional-services prose deliverables).
 
 ## Project context
 
 This repository sits inside a collaboration between two student teams at Stanford CS 224N, jointly mentored by Mirac Suzgun (Stanford SAIL NLP):
 
-- **memory subsystem** (*Retrieval-Augmented Structured Memory for Test-Time Learning*) — a no-ground-truth memory mechanism, developed by Jerry Gu, Sabrina Yen-Ko, and Shurui Liu.
+- **DC Retrieval Synthesis (DC-RS)** — the retrieval-synthesis variant of Suzgun et al.'s *Dynamic Cheatsheet: Test-Time Learning with Adaptive Memory* (arXiv:2504.07952). A single synthesizer LLM call builds a fresh cheatsheet for each task from the top-k retrieved past `(prompt, deliverable)` pairs. No ground-truth signal reaches the synthesizer.
 - **TRACE** (*Tool-augmented Reasoning via Atomic Cheatsheet Editing*) — a memory mechanism that uses a per-task correctness bit, developed by Kyleen Liao, Roshen Nair, and Arnold Yang.
 
 The two mechanisms are evaluated head-to-head on Mercor's APEX-v1-extended benchmark in this repository, and on the multi-turn agentic surface (Mercor's APEX-Agents) in the [`apex-agents-bench`](https://github.com/jerry2247/dc-research-group-mercor-apex-agents) sister repository. Both repositories share the same subsystem implementations and audit policy.
@@ -21,21 +21,20 @@ A thin policy and orchestration layer over Mercor's evaluation harness (`vendor/
 
 | Subsystem | CLI flag | Ground-truth signal | Spec |
 |---|---|---|---|
-| **memory subsystem** | `--memory` | None | [`docs/DYNAMIC_LEDGER_PRD.md`](docs/DYNAMIC_LEDGER_PRD.md) |
+| **DC Retrieval Synthesis** | `--dc-rs` | None | [`docs/DC_RS_PRD.md`](docs/DC_RS_PRD.md) |
 | **TRACE** | `--trace` | boolean per-task correctness bit | [`docs/TRACE_PRD.md`](docs/TRACE_PRD.md) |
 
 The benchmark dataset is Mercor's and is **not** redistributed; it is fetched at setup time from `mercor/APEX-v1-extended` on Hugging Face.
 
 ## Results
 
-On the only configuration that has been run end-to-end at the time of writing — `grok-4.3-high`, gpt-5.5 judge, Finance subset (n = 25):
-
 | Method | Pass@1 | Mean score (%) |
 |---|:---:|:---:|
 | Baseline (no memory) | 4 / 25 | 54.87 |
-| + memory subsystem | **5 / 25** | 50.02 |
+| + DC Retrieval Synthesis | TBD | TBD |
+| + TRACE | TBD | TBD |
 
-Full per-domain × per-method table (with placeholders for Legal, Consulting, Medicine, and the TRACE row across all four), per-task breakdown, and a worked example of a memory subsystem entry that converted a 23 → 92 score on a downstream task: [`results.md`](results.md). Pre-registered rollout order for the remaining cells: [`docs/EVALUATION_PLAN.md`](docs/EVALUATION_PLAN.md).
+Full per-domain × per-method table (with placeholders for the cells that have not yet been run) and per-task breakdown: [`results.md`](results.md). Pre-registered rollout order for the remaining cells: [`docs/EVALUATION_PLAN.md`](docs/EVALUATION_PLAN.md).
 
 ## Reproduce
 
@@ -48,9 +47,13 @@ make fetch-dataset                                          # fetches mercor/APE
 apex-bench run --model grok-4.3-high --domain Finance --limit 25 \
     --output runs/grok43high-baseline/results.csv
 
-# memory subsystem
-apex-bench run --model grok-4.3-high --domain Finance --limit 25 --memory \
-    --output runs/grok43high-dl/results.csv
+# DC Retrieval Synthesis
+apex-bench run --model grok-4.3-high --domain Finance --limit 25 --dc-rs \
+    --output runs/grok43high-dc-rs/results.csv
+
+# TRACE
+apex-bench run --model grok-4.3-high --domain Finance --limit 25 --trace \
+    --output runs/grok43high-trace/results.csv
 ```
 
 Full setup (venv, API keys, dataset hashes) and the documented divergences from Mercor's published harness: [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md), [`docs/AUDIT.md`](docs/AUDIT.md).
@@ -60,12 +63,11 @@ Full setup (venv, API keys, dataset hashes) and the documented divergences from 
 | Path | Contents |
 |---|---|
 | `src/apex_bench/` | The harness — policy, runner, audit, CSV schema |
-| `src/apex_bench/memory/` | memory subsystem subsystem: config, retriever, curator, injector, prompts |
+| `src/apex_bench/dc_rs/` | DC Retrieval Synthesis subsystem: config, retriever, synthesizer, injector, prompts |
 | `src/apex_bench/trace/` | TRACE subsystem: reflector, curator, prompts |
 | `vendor/apex_evals/` | Mercor's evaluation harness, vendored at `6cbf3f43` |
 | `data/APEX-v1-extended/` | Mercor's benchmark CSV, fetched from `mercor/APEX-v1-extended` |
 | `runs/grok43high-baseline/` | Baseline run, grok-4.3-high, Finance subset |
-| `runs/grok43high-dl/` | memory subsystem run, same profile, same subset |
 | `docs/` | Architecture, PRDs, reproducibility, audit. Index: [`docs/INDEX.md`](docs/INDEX.md) |
 
 Behavioral fidelity to Mercor's published evaluation surface is enforced by pytest assertions and a code-level audit; see [`docs/AUDIT.md`](docs/AUDIT.md).
@@ -77,20 +79,6 @@ Code: see [`LICENSE`](LICENSE). Mercor's vendored harness and benchmark dataset 
 ## Citation
 
 ```bibtex
-@misc{gu_yenko_liu_2026_dynamic_ledger,
-  title  = {memory subsystem: Retrieval-Augmented Structured Memory for
-            Test-Time Learning},
-  author = {Gu, Jerry and Yen-Ko, Sabrina and Liu, Shurui},
-  note   = {Mentor: Mirac Suzgun},
-  year   = {2026}
-}
-
-@misc{liao_nair_yang_2026_trace,
-  title  = {TRACE: Tool-augmented Reasoning via Atomic Cheatsheet Editing},
-  author = {Liao, Kyleen and Nair, Roshen and Yang, Arnold},
-  year   = {2026}
-}
-
 @misc{suzgun_yuksekgonul_bianchi_jurafsky_zou_2025_dynamic_cheatsheet,
   title  = {Dynamic Cheatsheet: Test-Time Learning with Adaptive Memory},
   author = {Suzgun, Mirac and Yuksekgonul, Mert and Bianchi, Federico and
@@ -100,6 +88,12 @@ Code: see [`LICENSE`](LICENSE). Mercor's vendored harness and benchmark dataset 
   archivePrefix = {arXiv},
   primaryClass  = {cs.CL},
   url    = {https://arxiv.org/abs/2504.07952}
+}
+
+@misc{liao_nair_yang_2026_trace,
+  title  = {TRACE: Tool-augmented Reasoning via Atomic Cheatsheet Editing},
+  author = {Liao, Kyleen and Nair, Roshen and Yang, Arnold},
+  year   = {2026}
 }
 
 @misc{suzgun_kalai_2024_meta_prompting,

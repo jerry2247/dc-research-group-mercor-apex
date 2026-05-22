@@ -3,7 +3,7 @@
 
 Uses the GROUND-TRUTH correctness bit (boolean ``criteria_passed ==
 criteria_total``) — intentionally, per the TRACE paper. Distinct from
-the memory subsystem subsystem which is no-GT.
+the DC Retrieval Synthesis subsystem which is no-GT.
 """
 
 from __future__ import annotations

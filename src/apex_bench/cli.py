@@ -506,28 +506,32 @@ def run(
     ),
     judge_temperature: float = typer.Option(DEFAULT_JUDGE_TEMPERATURE, "--judge-temperature"),
     judge_max_tokens: int = typer.Option(DEFAULT_JUDGE_MAX_TOKENS, "--judge-max-tokens", min=1024),
-    memory: bool = typer.Option(
+    dc_rs: bool = typer.Option(
         False,
-        "--memory/--no-memory",
-        help="Enable the memory subsystem (no-ground-truth) subsystem. Default: "
-        "off. When on, each task is preceded by a dual-embedding retrieval "
-        "into the per-domain ledger; after grading, the curator examines the "
-        "work and emits <memory_updates> JSON ops that the wrapper applies to "
-        "the ledger. The curator runs on the same model as the selected "
-        "agent profile (only the judge is fixed at gpt-5.5). See "
-        "docs/DYNAMIC_LEDGER_PRD.md.",
+        "--dc-rs/--no-dc-rs",
+        help="Enable the DC Retrieval Synthesis subsystem. Default: off. "
+        "When on, each task embeds its prompt, retrieves the top-k most "
+        "similar prior (prompt, deliverable) pairs from the per-domain "
+        "bank, and makes one synthesizer LLM call (same model as the "
+        "selected agent profile) that produces a fresh cheatsheet from "
+        "those pairs and the previous-task cheatsheet. The cheatsheet is "
+        "prepended to the agent's user prompt. After grading, the new "
+        "(prompt, deliverable) pair is appended to the bank. No "
+        "ground-truth signal reaches the synthesizer. See "
+        "docs/DC_RS_PRD.md.",
     ),
-    dynamic_ledger_top_k: int = typer.Option(
-        5,
-        "--memory-top-k",
+    dc_rs_top_k: int = typer.Option(
+        3,
+        "--dc-rs-top-k",
         min=0,
-        help="Top-k per retrieval axis when the memory subsystem is on.",
+        help="Top-k retrieval when DC-RS is on. Default 3 per the "
+        "published Dynamic Cheatsheet — Retrieval Synthesis spec.",
     ),
     trace: bool = typer.Option(
         False,
         "--trace/--no-trace",
         help="Enable the TRACE (uses-ground-truth) subsystem. Default: off. "
-        "Mutually exclusive with --memory. When on, each task is "
+        "Mutually exclusive with --dc-rs. When on, each task is "
         "preceded by a dual-embedding retrieval into the per-domain "
         "cheatsheet; the agent emits a <citations>[...] tag stripped "
         "before grading; after grading the boolean criteria_passed==total "
@@ -544,8 +548,8 @@ def run(
     azure: bool = typer.Option(
         False,
         "--azure/--no-azure",
-        help="Route GPT-5.5 chat completions (judge + test profile + memory subsystem "
-        "curator + TRACE reflector/curator) through Azure-OpenAI. "
+        help="Route GPT-5.5 chat completions (judge + test profile + DC-RS "
+        "synthesizer + TRACE reflector/curator) through Azure-OpenAI. "
         "Requires AZURE_API_KEY (or AZURE_OPENAI_API_KEY), AZURE_API_BASE "
         "(or AZURE_OPENAI_ENDPOINT), and AZURE_API_VERSION; the Azure "
         "deployment name is AZURE_GPT55_DEPLOYMENT_NAME (default `gpt-5.5`). "
@@ -568,13 +572,13 @@ def run(
     from datetime import datetime
 
     from apex_bench.azure_routing import AzureConfig
-    from apex_bench.memory.config import DynamicLedgerConfig
+    from apex_bench.dc_rs.config import DCRSConfig
     from apex_bench.runner import JudgeOverride, RunOptions
     from apex_bench.trace.config import TraceConfig
 
-    if memory and trace:
+    if dc_rs and trace:
         console.print(
-            "[red]error:[/red] --memory and --trace are mutually exclusive; pick one."
+            "[red]error:[/red] --dc-rs and --trace are mutually exclusive; pick one."
         )
         raise typer.Exit(code=2)
     from apex_bench.runner import run as run_runner
@@ -616,9 +620,9 @@ def run(
         task_ids=ids_tuple,
         start_index=start_index,
         limit=limit,
-        memory=DynamicLedgerConfig(
-            enabled=memory,
-            top_k_per_axis=dynamic_ledger_top_k,
+        dc_rs=DCRSConfig(
+            enabled=dc_rs,
+            top_k=dc_rs_top_k,
         ),
         trace=TraceConfig(
             enabled=trace,
