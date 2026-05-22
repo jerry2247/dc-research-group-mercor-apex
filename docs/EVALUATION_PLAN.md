@@ -29,17 +29,17 @@ Each method has a single CSV per repo. Continuing extends that CSV; per-domain l
 ```bash
 apex-bench run --model grok-4.3-high --domain Consulting --limit 25 \
     --dynamic-ledger \
-    --output runs/finance-grok43high-dl/results.csv
+    --output runs/grok43high-dl/results.csv
 ```
 
 **Next domain (baseline):**
 
 ```bash
 apex-bench run --model grok-4.3-high --domain Consulting --limit 25 \
-    --output runs/finance-grok43high/results.csv
+    --output runs/grok43high-baseline/results.csv
 ```
 
-When all four domains are complete on baseline + DL, add `--trace` (against a separate CSV, e.g. `runs/all-grok43high-trace/results.csv`) and run the same domain order from scratch; a new per-domain ledger begins from empty for each domain.
+When all four domains are complete on baseline + Dynamic Ledger, run TRACE against a fresh CSV at `runs/grok43high-trace/results.csv` (its own per-domain cheatsheet starts empty for each domain).
 
 ## Pre-registered, not post-hoc
 

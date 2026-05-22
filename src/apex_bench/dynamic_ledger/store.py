@@ -53,23 +53,26 @@ class SnapshotStore:
             self.snapshot_path(idx).read_text(encoding="utf-8")
         )
 
-    def load_for_resume(self, *, max_index_allowed: int, domain: str) -> tuple[int, DynamicLedger]:
-        """Load the highest snapshot whose index ≤ ``max_index_allowed``.
+    def load_for_resume(self, *, domain: str) -> tuple[int, DynamicLedger]:
+        """Load the highest snapshot on disk for this domain.
 
-        If no snapshot exists, returns ``(0, empty-store)``. If snapshots
-        exist beyond ``max_index_allowed`` (e.g., the CSV was rolled back
-        but snapshots weren't), the extras are left on disk; only the
-        in-bound max is loaded.
+        Returns ``(0, empty-store)`` when no snapshots exist. The
+        snapshot store is the source of truth for ledger state; the
+        results CSV is only the source of truth for which tasks have
+        been completed. They diverge legitimately whenever the curator
+        emits ops on a task whose agent ultimately failed (the curator
+        still runs, the snapshot is saved, but no CSV row is written).
+        Loading the latest snapshot ensures no curator emission is ever
+        silently dropped on resume.
         """
         candidates: list[int] = []
         for f in self.domain_dir.iterdir():
             m = _SNAPSHOT_RE.match(f.name)
             if m:
                 candidates.append(int(m.group(1)))
-        in_bound = [i for i in candidates if i <= max_index_allowed]
-        if not in_bound:
+        if not candidates:
             return 0, DynamicLedger(domain=domain)
-        idx = max(in_bound)
+        idx = max(candidates)
         store = DynamicLedger.model_validate_json(
             self.snapshot_path(idx).read_text(encoding="utf-8")
         )

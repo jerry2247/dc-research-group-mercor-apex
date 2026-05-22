@@ -43,7 +43,14 @@ def test_save_and_latest_roundtrip(tmp_path: Path) -> None:
     assert len(loaded.entries) == 2
 
 
-def test_load_for_resume_respects_max_index_allowed(tmp_path: Path) -> None:
+def test_load_for_resume_loads_latest_snapshot_on_disk(tmp_path: Path) -> None:
+    """``load_for_resume`` must always return the highest snapshot index on disk.
+
+    Snapshots may legitimately exist beyond the CSV's completed-row count
+    when the curator emits ops on an agent-failed task (the snapshot is
+    saved but no CSV row is written). The snapshot store is the source of
+    truth for ledger state; this test pins that contract.
+    """
     ss = SnapshotStore.for_domain(tmp_path, "Finance")
     store = _make_store()
     ss.save(store, index=1)
@@ -56,16 +63,23 @@ def test_load_for_resume_respects_max_index_allowed(tmp_path: Path) -> None:
         created=2,
     )
     ss.save(store, index=2)
+    store.add(
+        section="C",
+        content="gamma",
+        source_problem="gpb",
+        content_embedding=[1.0, 1.0],
+        source_problem_embedding=[1.0, 1.0],
+        created=3,
+    )
     ss.save(store, index=3)
-    # CSV says only 1 task is completed; we must roll back to snapshot_0001
-    idx, loaded = ss.load_for_resume(max_index_allowed=1, domain="Finance")
-    assert idx == 1
-    assert len(loaded.entries) == 1
+    idx, loaded = ss.load_for_resume(domain="Finance")
+    assert idx == 3
+    assert len(loaded.entries) == 3
 
 
 def test_load_for_resume_empty_dir(tmp_path: Path) -> None:
     ss = SnapshotStore.for_domain(tmp_path, "Finance")
-    idx, loaded = ss.load_for_resume(max_index_allowed=10, domain="Finance")
+    idx, loaded = ss.load_for_resume(domain="Finance")
     assert idx == 0
     assert loaded.domain == "Finance"
     assert loaded.entries == {}
