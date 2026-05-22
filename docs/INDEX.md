@@ -15,6 +15,7 @@ column. Start here if you're new.
 
 | Doc | What it answers | Read this if you're asking… |
 |---|---|---|
+| [`EVALUATION_PLAN.md`](EVALUATION_PLAN.md) | Pre-registered execution order for every (domain, method) cell, with status. The source of truth for the rollout. | "Which domain should I run next?" / "How do I continue this experiment?" |
 | [`DYNAMIC_LEDGER_PRD.md`](DYNAMIC_LEDGER_PRD.md) | Specification of the Dynamic Ledger subsystem — pipeline, entry shape, curator prompt design, CSV columns | "How does `--dynamic-ledger` actually work?" |
 | [`TRACE_PRD.md`](TRACE_PRD.md) | Specification of the TRACE subsystem — pipeline, bullet shape, GT-bit threading, citation parsing | "How does `--trace` actually work?" |
 | [`AUDIT.md`](AUDIT.md) | Line-by-line confirmation we match Mercor's harness behavior. Records every fidelity check with the regression test that protects it. | "Are we really running Mercor's harness?" / "What did we change?" |
