@@ -54,13 +54,13 @@ def test_trace_on_csv_extends_baseline_at_end() -> None:
     assert tuple(on[len(baseline) :]) == _TRACE_CSV_COLUMNS
 
 
-def test_trace_and_dynamic_ledger_in_csv_headers_are_mutually_exclusive() -> None:
+def test_trace_and_dc_rs_in_csv_headers_are_mutually_exclusive() -> None:
     import pytest
 
     from apex_bench.runner import csv_headers
 
     with pytest.raises(ValueError):
-        csv_headers("m", with_dynamic_ledger=True, with_trace=True)
+        csv_headers("m", with_dc_rs=True, with_trace=True)
 
 
 def test_trace_config_default_is_off() -> None:

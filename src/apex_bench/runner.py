@@ -48,7 +48,7 @@ from apex_bench.config import (
     DEFAULT_JUDGE_TEMPERATURE,
 )
 from apex_bench.dataset import Task, csv_path, load_tasks, validate
-from apex_bench.dynamic_ledger.config import DynamicLedgerConfig
+from apex_bench.dc_rs.config import DCRSConfig
 from apex_bench.paths import repo_root, vendor_dir
 from apex_bench.test_models import TestModelProfile
 from apex_bench.trace.config import TraceConfig
@@ -122,21 +122,20 @@ class RunOptions:
     task_ids: tuple[str, ...] | None = None
     start_index: int = 0
     limit: int | None = None
-    dynamic_ledger: DynamicLedgerConfig = field(default_factory=DynamicLedgerConfig)
-    """Dynamic Ledger (no-GT) configuration. When ``enabled=False``
+    dc_rs: DCRSConfig = field(default_factory=DCRSConfig)
+    """DC Retrieval Synthesis configuration. When ``enabled=False``
     (default) the runner takes the baseline code path and the CSV schema
-    is byte-identical to the no-ledger shape. See
-    ``docs/DYNAMIC_LEDGER_PRD.md``."""
+    is byte-identical to the no-memory shape. See ``docs/DC_RS_PRD.md``."""
 
     trace: TraceConfig = field(default_factory=TraceConfig)
-    """TRACE (uses-GT) configuration. Mutually exclusive with the
-    Dynamic Ledger — at most one of ``dynamic_ledger.enabled`` and
-    ``trace.enabled`` may be True per run. See ``docs/TRACE_PRD.md``."""
+    """TRACE (uses-GT) configuration. Mutually exclusive with DC-RS —
+    at most one of ``dc_rs.enabled`` and ``trace.enabled`` may be True
+    per run. See ``docs/TRACE_PRD.md``."""
 
     azure: AzureConfig = field(default_factory=AzureConfig)
     """Azure-OpenAI routing for GPT-5.5 chat completions. When
     ``enabled=True`` any ``gpt-5.5*`` model id (judge, test profile,
-    Dynamic Ledger curator, TRACE reflector/curator) is rewritten to
+    DC-RS synthesizer, TRACE reflector/curator) is rewritten to
     ``azure/<deployment_name>`` before reaching LiteLLM. The embedding
     model (``text-embedding-3-large``) always uses OpenAI regardless
     of this setting. See ``apex_bench/azure_routing.py``."""
@@ -197,28 +196,25 @@ _TRACE_CSV_COLUMNS = (
 )
 
 
-_DYNAMIC_LEDGER_CSV_COLUMNS = (
-    "dynamic_ledger_enabled",
-    "dynamic_ledger_snapshot_index_before",
-    "retrieved_entry_count",
-    "retrieved_entry_ids",
-    "curator_create_count",
-    "curator_create_blocked_count",
-    "curator_update_count",
-    "curator_delete_count",
-    "dynamic_ledger_active_entry_count_after",
-    "dynamic_ledger_total_entry_count_after",
-    "dynamic_ledger_total_active_chars_after",
-    "curator_prompt_tokens",
-    "curator_completion_tokens",
-    "curator_wall_seconds",
+_DC_RS_CSV_COLUMNS = (
+    "dc_rs_enabled",
+    "dc_rs_bank_size_before",
+    "dc_rs_bank_size_after",
+    "dc_rs_retrieved_count",
+    "dc_rs_retrieved_bank_ids",
+    "dc_rs_appended_bank_id",
+    "synthesizer_prompt_tokens",
+    "synthesizer_completion_tokens",
+    "synthesizer_wall_seconds",
+    "synthesizer_cheatsheet_chars",
+    "synthesizer_used_fallback",
 )
 
 
 def csv_headers(
     model_key: str,
     *,
-    with_dynamic_ledger: bool = False,
+    with_dc_rs: bool = False,
     with_trace: bool = False,
 ) -> list[str]:
     """Per-task row schema. Preserves upstream's shape, adds audit columns.
@@ -233,9 +229,9 @@ def csv_headers(
     fingerprint of what actually reached the model. They do not change
     generation, grading, resume, or scoring behavior.
 
-    When ``with_dynamic_ledger`` is True we additionally append the Dynamic
-    Ledger columns at the END of the row. This preserves the no-ledger
-    header order byte-identical (a load-bearing fidelity invariant).
+    When ``with_dc_rs`` is True we additionally append the DC-RS columns
+    at the END of the row. This preserves the no-memory header order
+    byte-identical (a load-bearing fidelity invariant).
     """
     base = ["task_id", "domain", "status"]
     for field_name in RESULT_FIELDS:
@@ -260,10 +256,10 @@ def csv_headers(
             "test_model_id",
         ]
     )
-    if with_dynamic_ledger and with_trace:
-        raise ValueError("with_dynamic_ledger and with_trace are mutually exclusive")
-    if with_dynamic_ledger:
-        base.extend(_DYNAMIC_LEDGER_CSV_COLUMNS)
+    if with_dc_rs and with_trace:
+        raise ValueError("with_dc_rs and with_trace are mutually exclusive")
+    if with_dc_rs:
+        base.extend(_DC_RS_CSV_COLUMNS)
     if with_trace:
         base.extend(_TRACE_CSV_COLUMNS)
     return base
@@ -577,7 +573,7 @@ def _preflight_credentials(opts: RunOptions, selected: list[Task]) -> None:
         missing.append("REDUCTO_API_KEY")
     # Embeddings always go through OpenAI even when chat is routed to Azure.
     if (
-        (opts.dynamic_ledger.enabled or opts.trace.enabled)
+        (opts.dc_rs.enabled or opts.trace.enabled)
         and not os.environ.get("OPENAI_API_KEY")
         and "OPENAI_API_KEY" not in missing
     ):
@@ -602,7 +598,7 @@ async def _process_task(
     response_template: str,
     grading_template_path: str,
     *,
-    dynamic_ledger_runtime: Any | None = None,  # type: DynamicLedgerRuntime | None
+    dc_rs_runtime: Any | None = None,  # type: DCRSRuntime | None
     trace_runtime: Any | None = None,  # type: TraceRuntime | None
     azure_cfg: AzureConfig | None = None,
 ) -> tuple[str, dict] | tuple[None, str]:
@@ -612,19 +608,19 @@ async def _process_task(
     skipped, mirroring upstream behavior at run_with_hf.py:144-191 — a task
     row is written ONLY if all (model x run) combinations succeed.
 
-    When ``dynamic_ledger_runtime`` is None, the function takes the
-    BASELINE code path — no Dynamic Ledger imports, no retrieval, no
-    curator, no extra CSV columns. This is the byte-identical baseline
-    preserved by the ``test_dynamic_ledger_off_csv_schema_unchanged``
-    fidelity test.
+    When ``dc_rs_runtime`` is None, the function takes the BASELINE code
+    path — no DC-RS imports, no retrieval, no synthesizer, no extra CSV
+    columns. This is the byte-identical baseline preserved by the
+    ``test_dc_rs_off_csv_schema_unchanged`` fidelity test.
 
-    When ``dynamic_ledger_runtime`` is provided (the Ledger is on), two
-    hooks fire: (A) retrieve + prepend strategies block to the user-prompt
-    slot before the vendor template substitution; (B) call the curator
-    after grading, apply ``<memory_updates>`` ops, persist the per-domain
-    snapshot. None of the GT data (criteria, scores, expected answer) is
-    threaded into the curator — see
-    ``test_curator_signature_has_no_outcome``.
+    When ``dc_rs_runtime`` is provided (DC-RS is on), two hooks fire:
+    (A) embed the prompt, retrieve the top-k most similar past pairs from
+    the domain bank, call the synthesizer to produce a fresh cheatsheet,
+    prepend the cheatsheet block to the user-prompt slot; (B) after
+    grading, append ``(prompt, deliverable, prompt_embedding)`` to the
+    bank. None of the GT data (criteria, scores, expected answer) is
+    threaded into the synthesizer — see
+    ``test_synthesizer_signature_has_no_outcome``.
     """
     # Lazy imports so module-level import works without the vendor install.
     with vendor_cwd():
@@ -643,45 +639,91 @@ async def _process_task(
     model_key = sanitize_model_key(profile.model_id)
     prefix = f"{model_key}_1"
 
-    # --- Dynamic Ledger Hook A: retrieve + prepend strategies block --------
+    # --- DC-RS Hook A: retrieve + synthesize + prepend cheatsheet block ----
     # Computes the per-task prompt fragment that augments ``task.prompt``.
-    # When the Ledger is off ``augmented_user_prompt is task.prompt``
-    # (identity) so the downstream substitution is byte-identical to
-    # the baseline.
+    # When DC-RS is off ``augmented_user_prompt is task.prompt`` (identity)
+    # so the downstream substitution is byte-identical to the baseline.
     augmented_user_prompt = task.prompt
-    dynamic_ledger_csv: dict[str, Any] = {}
-    retrieved_entries: list[Any] = []
-    snapshot_index_before = 0
-    if dynamic_ledger_runtime is not None:
-        from apex_bench.dynamic_ledger import augment_user_prompt, retrieve
-        from apex_bench.dynamic_ledger.runtime import dynamic_ledger_csv_fragment_empty
+    dc_rs_csv: dict[str, Any] = {}
+    q_emb: list[float] = []
+    if dc_rs_runtime is not None:
+        from apex_bench.dc_rs import (
+            augment_user_prompt as dc_rs_augment,
+        )
+        from apex_bench.dc_rs import (
+            format_retrieved_entries as dc_rs_format_entries,
+        )
+        from apex_bench.dc_rs import (
+            retrieve as dc_rs_retrieve,
+        )
+        from apex_bench.dc_rs import (
+            synthesize as dc_rs_synthesize,
+        )
+        from apex_bench.dc_rs.runtime import dc_rs_csv_fragment_empty
 
-        dynamic_ledger_csv = dynamic_ledger_csv_fragment_empty()
-        store = dynamic_ledger_runtime.store_for(task.domain)
-        snapshot_index_before = dynamic_ledger_runtime.next_ordinal.get(task.domain, 0)
-        dynamic_ledger_csv["dynamic_ledger_snapshot_index_before"] = snapshot_index_before
+        dc_rs_csv = dc_rs_csv_fragment_empty()
+        bank = dc_rs_runtime.bank_for(task.domain)
+        dc_rs_csv["dc_rs_bank_size_before"] = len(bank.entries)
         try:
-            q_emb = dynamic_ledger_runtime.embed.embed([task.prompt])[0]
-            retrieved_entries = retrieve(
-                store,
+            q_emb = dc_rs_runtime.embed.embed([task.prompt])[0]
+            retrieved = dc_rs_retrieve(
+                bank,
                 query_embedding=q_emb,
-                k=dynamic_ledger_runtime.cfg.top_k_per_axis,
-                similarity_threshold=dynamic_ledger_runtime.cfg.retrieval_similarity_threshold,
+                k=dc_rs_runtime.cfg.top_k,
             )
         except Exception as exc:
             log.warning(
-                "dynamic ledger: retrieval failed for task=%s domain=%s (%s); proceeding without retrieval",
+                "dc-rs: retrieval failed for task=%s domain=%s (%s); "
+                "proceeding without retrieval",
                 task.task_id,
                 task.domain,
                 exc,
             )
-            retrieved_entries = []
-        dynamic_ledger_csv["retrieved_entry_count"] = len(retrieved_entries)
-        dynamic_ledger_csv["retrieved_entry_ids"] = json.dumps(
-            [e.entry_id for e in retrieved_entries]
+            retrieved = []
+            q_emb = []
+        dc_rs_csv["dc_rs_retrieved_count"] = len(retrieved)
+        dc_rs_csv["dc_rs_retrieved_bank_ids"] = json.dumps(
+            [r.entry.bank_id for r in retrieved]
         )
-        if retrieved_entries:
-            augmented_user_prompt = augment_user_prompt(task.prompt, entries=retrieved_entries)
+        retrieved_block = dc_rs_format_entries(retrieved)
+        current_ch = dc_rs_runtime.cheatsheet_for(task.domain)
+        try:
+            syn = dc_rs_synthesize(
+                current_cheatsheet=current_ch,
+                retrieved_entries_block=retrieved_block,
+                task_prompt=task.prompt,
+                cfg=dc_rs_runtime.cfg,
+            )
+            new_ch = syn.cheatsheet
+            dc_rs_runtime.write_cheatsheet(task.domain, new_ch)
+            dc_rs_runtime.archive_cheatsheet(task.domain, task.task_id, new_ch)
+            dc_rs_runtime.append_synth_log(
+                task.domain,
+                {
+                    "task_id": task.task_id,
+                    "retrieved_bank_ids": [r.entry.bank_id for r in retrieved],
+                    "retrieved_similarities": [round(r.similarity, 4) for r in retrieved],
+                    "prompt_tokens": syn.prompt_tokens,
+                    "completion_tokens": syn.completion_tokens,
+                    "wall_seconds": syn.wall_seconds,
+                    "used_fallback": syn.used_fallback,
+                    "cheatsheet_chars": len(new_ch),
+                },
+            )
+            dc_rs_csv["synthesizer_prompt_tokens"] = syn.prompt_tokens
+            dc_rs_csv["synthesizer_completion_tokens"] = syn.completion_tokens
+            dc_rs_csv["synthesizer_wall_seconds"] = syn.wall_seconds
+            dc_rs_csv["synthesizer_cheatsheet_chars"] = len(new_ch)
+            dc_rs_csv["synthesizer_used_fallback"] = syn.used_fallback
+            augmented_user_prompt = dc_rs_augment(task.prompt, cheatsheet=new_ch)
+        except Exception as exc:
+            log.warning(
+                "dc-rs: synthesizer failed for task=%s domain=%s (%s); "
+                "proceeding with the un-augmented prompt",
+                task.task_id,
+                task.domain,
+                exc,
+            )
 
     # --- TRACE Hook A: retrieve + augment user prompt ----------------------
     trace_csv: dict[str, Any] = {}
@@ -760,8 +802,8 @@ async def _process_task(
     gen_row = gen_result.results[0]
     response = gen_row.get("response", "") or ""
 
-    # The Dynamic Ledger does not rewrite the deliverable. TRACE parses
-    # and strips a `<citations>` tag on the last line of the response.
+    # DC-RS does not rewrite the deliverable. TRACE parses and strips
+    # a `<citations>` tag on the last line of the response.
     cited_bullet_ids: list[str] = []
     response_for_grading = response
     if trace_runtime is not None:
@@ -869,67 +911,38 @@ async def _process_task(
         "test_model_id": profile.model_id,
     }
 
-    # --- Dynamic Ledger Hook B: curator call + apply ops + persist --------
-    # NO ground-truth signal is passed to the curator. The curator sees
-    # only: active playbook, task prompt (without our injection), and
-    # the response prose. Per the test_curator_signature_has_no_outcome
-    # fidelity test.
-    if dynamic_ledger_runtime is not None:
-        from apex_bench.dynamic_ledger import apply_ops, curate
-
-        store = dynamic_ledger_runtime.store_for(task.domain)
-        ordinal = dynamic_ledger_runtime.current_ordinal_for(task.domain)
-        try:
-            curator_result = curate(
-                store,
-                task.prompt,  # WITHOUT the injection prefix
-                response,
-                cfg=dynamic_ledger_runtime.cfg,
+    # --- DC-RS Hook B: append the new (prompt, deliverable) pair to the
+    # per-domain bank. NO ground-truth signal is consumed. Per the
+    # test_synthesizer_signature_has_no_outcome fidelity test.
+    if dc_rs_runtime is not None:
+        if not q_emb:
+            # Hook A failed to embed the prompt; nothing to append.
+            dc_rs_csv["dc_rs_bank_size_after"] = len(
+                dc_rs_runtime.bank_for(task.domain).entries
             )
-            stats = apply_ops(
-                store=store,
-                ops=curator_result.ops,
-                retrieved=retrieved_entries,
-                embed=dynamic_ledger_runtime.embed,
-                cfg=dynamic_ledger_runtime.cfg,
-                current_ordinal=ordinal,
+        else:
+            try:
+                bank_id = dc_rs_runtime.append_entry(
+                    domain=task.domain,
+                    task_id=task.task_id,
+                    task_prompt=task.prompt,
+                    deliverable=response_for_grading,
+                    prompt_embedding=q_emb,
+                )
+                dc_rs_csv["dc_rs_appended_bank_id"] = bank_id
+            except Exception as exc:
+                log.warning(
+                    "dc-rs: bank append failed for task=%s domain=%s (%s); "
+                    "the cheatsheet was already written for this task but the "
+                    "pair will not contribute to retrieval on later tasks",
+                    task.task_id,
+                    task.domain,
+                    exc,
+                )
+            dc_rs_csv["dc_rs_bank_size_after"] = len(
+                dc_rs_runtime.bank_for(task.domain).entries
             )
-            dynamic_ledger_runtime.persist(task.domain)
-            dynamic_ledger_runtime.snapshot_stores[task.domain].append_curator_log(
-                {
-                    "task_id": task.task_id,
-                    "ordinal": ordinal,
-                    "create": stats.create_committed,
-                    "create_blocked": stats.create_blocked,
-                    "update": stats.update,
-                    "delete": stats.delete,
-                    "parse_error": curator_result.parse_error,
-                    "prompt_tokens": curator_result.prompt_tokens,
-                    "completion_tokens": curator_result.completion_tokens,
-                    "wall_seconds": curator_result.wall_seconds,
-                }
-            )
-            dynamic_ledger_csv["curator_create_count"] = stats.create_committed
-            dynamic_ledger_csv["curator_create_blocked_count"] = stats.create_blocked
-            dynamic_ledger_csv["curator_update_count"] = stats.update
-            dynamic_ledger_csv["curator_delete_count"] = stats.delete
-            dynamic_ledger_csv["curator_prompt_tokens"] = curator_result.prompt_tokens
-            dynamic_ledger_csv["curator_completion_tokens"] = curator_result.completion_tokens
-            dynamic_ledger_csv["curator_wall_seconds"] = curator_result.wall_seconds
-        except Exception as exc:
-            log.warning(
-                "dynamic ledger: curator failed for task=%s domain=%s (%s); leaving ledger unchanged",
-                task.task_id,
-                task.domain,
-                exc,
-            )
-        active = store.active_entries()
-        dynamic_ledger_csv["dynamic_ledger_active_entry_count_after"] = len(active)
-        dynamic_ledger_csv["dynamic_ledger_total_entry_count_after"] = len(store.entries)
-        dynamic_ledger_csv["dynamic_ledger_total_active_chars_after"] = sum(
-            len(e.content) for e in active
-        )
-        row.update(dynamic_ledger_csv)
+        row.update(dc_rs_csv)
 
     # --- TRACE Hook B: bump counters, reflect, curate, apply, persist ------
     if trace_runtime is not None:
@@ -1126,74 +1139,68 @@ async def run_async(opts: RunOptions) -> dict:
         "selected=%d already_completed=%d pending=%d", len(selected), len(completed), len(pending)
     )
 
-    if opts.dynamic_ledger.enabled and opts.trace.enabled:
+    if opts.dc_rs.enabled and opts.trace.enabled:
         raise ValueError(
-            "--dynamic-ledger and --trace are mutually exclusive; pick one memory subsystem."
+            "--dc-rs and --trace are mutually exclusive; pick one memory subsystem."
         )
     model_key = sanitize_model_key(opts.profile.model_id)
     headers = csv_headers(
         model_key,
-        with_dynamic_ledger=opts.dynamic_ledger.enabled,
+        with_dc_rs=opts.dc_rs.enabled,
         with_trace=opts.trace.enabled,
     )
 
-    # --- Dynamic Ledger: build per-run runtime (when enabled) ----------------
-    dynamic_ledger_runtime: Any | None = None
-    if opts.dynamic_ledger.enabled:
+    # --- DC-RS: build per-run runtime (when enabled) -------------------------
+    dc_rs_runtime: Any | None = None
+    if opts.dc_rs.enabled:
         import dataclasses
 
-        from apex_bench.dynamic_ledger.runtime import DynamicLedgerRuntime
+        from apex_bench.dc_rs.runtime import DCRSRuntime
 
         run_dir = opts.output_csv.parent
-        completed_per_domain: dict[str, int] = {}
-        if opts.output_csv.is_file():
-            try:
-                with opts.output_csv.open("r", encoding="utf-8") as fh:
-                    rdr = csv.DictReader(fh)
-                    for r in rdr:
-                        d = r.get("domain", "")
-                        if r.get("status") == "completed" and d:
-                            completed_per_domain[d] = completed_per_domain.get(d, 0) + 1
-            except Exception:
-                completed_per_domain = {}
 
-        # The curator runs on the SAME model as the agent under test,
+        # The synthesizer runs on the SAME model as the agent under test,
         # with the same thinking effort. Only the judge model is fixed
-        # (gpt-5.5 medium). Fill the curator model in from the active
+        # (gpt-5.5 medium). Fill the synthesizer model in from the active
         # TestModelProfile here unless the user has set it explicitly.
-        cfg_in = opts.dynamic_ledger
-        if cfg_in.curator_model is None:
-            curator_extra: dict[str, Any] = {}
+        cfg_dc_rs_in = opts.dc_rs
+        if cfg_dc_rs_in.synthesizer_model is None:
+            extra_args: dict[str, Any] = {}
             # Flatten model_configs into kwargs so LiteLLM accepts them.
             if opts.profile.model_configs:
-                curator_extra.update(opts.profile.model_configs)
+                extra_args.update(opts.profile.model_configs)
             if opts.profile.enable_thinking is not None:
-                curator_extra["enable_thinking"] = opts.profile.enable_thinking
+                extra_args["enable_thinking"] = opts.profile.enable_thinking
             if opts.profile.thinking_tokens is not None:
-                curator_extra["thinking_tokens"] = opts.profile.thinking_tokens
-            # Prepend provider prefix when model_id is bare (e.g. "grok-4.3" → "xai/grok-4.3").
+                extra_args["thinking_tokens"] = opts.profile.thinking_tokens
+            # Prepend provider prefix when model_id is bare. Without this
+            # LiteLLM raises "LLM Provider NOT provided" and the runner's
+            # outer except silently aborts the synthesizer call.
             bare = opts.profile.model_id
-            routed_bare = bare if "/" in bare or not opts.profile.provider else f"{opts.profile.provider}/{bare}"
-            cfg_in = dataclasses.replace(
-                cfg_in,
-                curator_model=routed_bare,
-                curator_extra_args=curator_extra or None,
+            routed_bare = (
+                bare if "/" in bare or not opts.profile.provider
+                else f"{opts.profile.provider}/{bare}"
+            )
+            cfg_dc_rs_in = dataclasses.replace(
+                cfg_dc_rs_in,
+                synthesizer_model=routed_bare,
+                synthesizer_extra_args=extra_args or None,
             )
         # Apply Azure routing AFTER profile fill-in so gpt-5.5 → azure.
-        cfg_in = dataclasses.replace(
-            cfg_in, curator_model=route_model_id(cfg_in.curator_model, cfg=opts.azure)
+        cfg_dc_rs_in = dataclasses.replace(
+            cfg_dc_rs_in,
+            synthesizer_model=route_model_id(cfg_dc_rs_in.synthesizer_model, cfg=opts.azure),
         )
 
-        dynamic_ledger_runtime = DynamicLedgerRuntime.create(
-            cfg=cfg_in,
+        dc_rs_runtime = DCRSRuntime.create(
+            cfg=cfg_dc_rs_in,
             run_dir=run_dir,
-            completed_per_domain=completed_per_domain,
         )
         log.info(
-            "dynamic ledger: enabled (embedding=%s top_k=%d snapshot_root=%s)",
-            cfg_in.embedding_model,
-            cfg_in.top_k_per_axis,
-            run_dir / "dynamic_ledger",
+            "dc-rs: enabled (embedding=%s top_k=%d bank_root=%s)",
+            cfg_dc_rs_in.embedding_model,
+            cfg_dc_rs_in.top_k,
+            run_dir / "dc_rs",
         )
 
     # --- TRACE: build per-run runtime (when enabled) -------------------------
@@ -1302,7 +1309,7 @@ async def run_async(opts: RunOptions) -> dict:
                 opts.judge,
                 response_template,
                 grading_template_path,
-                dynamic_ledger_runtime=dynamic_ledger_runtime,
+                dc_rs_runtime=dc_rs_runtime,
                 trace_runtime=trace_runtime,
                 azure_cfg=opts.azure,
             )

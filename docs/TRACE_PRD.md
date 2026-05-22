@@ -3,8 +3,8 @@
 **TRACE** (Tool-augmented Reasoning via Atomic Cheatsheet Editing;
 Liao, Nair, Yang, Stanford CS224N) is a test-time-learning subsystem
 layered on the Mercor APEX-v1-extended single-shot prose benchmark.
-Unlike the Dynamic Ledger, TRACE *uses* the ground-truth correctness
-bit — intentionally, per the paper.
+TRACE *uses* the ground-truth correctness bit — intentionally, per
+the paper.
 
 We follow the paper's pipeline faithfully with these scoped
 adaptations to the single-shot prose-deliverable setting:
@@ -27,7 +27,7 @@ adaptations to the single-shot prose-deliverable setting:
 
 TRACE is **off by default**. With `--trace` off the runner takes the
 baseline code path; CSV schema is byte-identical to the no-TRACE
-shape. `--trace` and `--dynamic-ledger` are mutually exclusive.
+shape. `--trace` and `--dc-rs` are mutually exclusive.
 
 ## Pipeline
 
@@ -131,7 +131,7 @@ class TraceConfig:
 ```
 
 CLI flags: `--trace / --no-trace`, `--trace-top-k`. Mutually exclusive
-with `--dynamic-ledger`.
+with `--dc-rs`.
 
 ## Per-domain isolation
 

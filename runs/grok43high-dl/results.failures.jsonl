@@ -1,1 +1,0 @@
-{"domain": "Legal", "error": "generation returned empty response", "judge_model": "gpt-5.5", "model_id": "grok-4.3", "output_csv": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/runs/grok43high-dl/results.csv", "profile": "grok-4.3-high", "scope": "task", "status": "skipped", "task_id": "1323", "timestamp": "2026-05-22T07:25:49+00:00"}
