@@ -305,18 +305,22 @@ def curate(
         reflector_proposals=reflector_proposals,
     )
     started = time.time()
-    extra = dict(cfg.model_extra_args or {})
-    resp = litellm.completion(
-        model=cfg.curator_model,
-        messages=[
+    kwargs: dict = {
+        "model": cfg.curator_model,
+        "messages": [
             {"role": "system", "content": sys_msg},
             {"role": "user", "content": user_msg},
         ],
-        temperature=cfg.curator_temperature,
-        max_tokens=cfg.curator_max_tokens,
-        timeout=cfg.curator_timeout_seconds,
-        **extra,
-    )
+        "temperature": cfg.curator_temperature,
+        "max_tokens": cfg.curator_max_tokens,
+        "timeout": cfg.curator_timeout_seconds,
+    }
+    # The profile's extra args may carry their own temperature / timeout /
+    # reasoning_effort etc. Using ``dict.update`` lets the profile override
+    # the defaults without raising a kwarg-collision TypeError, which would
+    # silently abort the LLM call before LiteLLM is even reached.
+    kwargs.update(cfg.model_extra_args or {})
+    resp = litellm.completion(**kwargs)
     elapsed = time.time() - started
 
     choices = getattr(resp, "choices", None) or resp["choices"]
