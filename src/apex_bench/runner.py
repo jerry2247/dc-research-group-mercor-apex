@@ -948,6 +948,10 @@ async def _process_task(
         trace_csv["gt_correct_bit"] = gt_correct
         trace_runtime.record_citations(task.domain, cited=cited_bullet_ids, gt_correct=gt_correct)
         ordinal = trace_runtime.current_ordinal_for(task.domain)
+        # Persist the citation counter update even if the downstream
+        # reflector/curator call fails. A successful curator pass writes
+        # the same snapshot index again with the final edits applied.
+        trace_runtime.persist(task.domain)
         try:
             refl = trace_reflect(
                 tstore,
