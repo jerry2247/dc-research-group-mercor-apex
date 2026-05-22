@@ -34,7 +34,7 @@ shape. `--trace` and `--dynamic-ledger` are mutually exclusive.
 ```
    ┌──────────┐    ┌────────┐    ┌──────────┐    ┌─────────┐    ┌──────────┐    ┌──────────┐
    │ RETRIEVE │───▶│ INJECT │───▶│ GENERATE │───▶│  CITE   │───▶│  REFLECT │───▶│  CURATE  │
-   │ dual k=5 │    │ user   │    │ vendor   │    │ parse + │    │ same     │    │ same     │
+   │ dual k=8 │    │ user   │    │ vendor   │    │ parse + │    │ same     │    │ same     │
    │ cosine   │    │ prompt │    │ Generat- │    │ strip   │    │ model    │    │ model    │
    │          │    │        │    │ ionTask  │    │ tail    │    │          │    │          │
    └──────────┘    └────────┘    └──────────┘    └─────────┘    └──────────┘    └─────┬────┘
@@ -81,7 +81,7 @@ counters by summing across sources.
 
 | Hook | When | Effect |
 |------|------|--------|
-| **A. retrieve + augment** | before vendor template substitution | dual top-k retrieval (k=5 per axis); render cheatsheet block + citation instruction; the augmented string is substituted into the vendor template's `{{Prompt}}` slot; `{{Domain}}` unchanged. |
+| **A. retrieve + augment** | before vendor template substitution | dual top-k retrieval (k=8 per axis); render cheatsheet block + citation instruction; the augmented string is substituted into the vendor template's `{{Prompt}}` slot; `{{Domain}}` unchanged. |
 | **B. cite + strip** | after generator returns | parse `<citations>[bullet-...]</citations>` from the last line of the prose response; pass stripped prose to the grader; retain the original prose for the reflector + curator. |
 | **C. counters + reflect + curate + apply + persist** | after grading completes | bump cited bullets' counters per `gt_correct`; call reflector with `(cheatsheet, problem, response, cited_bullets, gt_correct)` → emits `<reflector_proposals>`; call curator with the above plus the reflector's proposals → emits `<cheatsheet_updates>`; apply `DELETE → CONSOLIDATE → UPDATE → CREATE`; persist per-domain snapshot. |
 
@@ -113,7 +113,7 @@ class TraceConfig:
     enabled: bool = False
     embedding_model: str = "text-embedding-3-large"
     embedding_dim: int = 3072
-    top_k_per_axis: int = 5
+    top_k_per_axis: int = 8
 
     # Filled from the active TestModelProfile by the runner
     reflector_model: str | None = None
@@ -122,13 +122,18 @@ class TraceConfig:
 
     reflector_temperature: float = 1.0
     curator_temperature: float = 1.0
-    reflector_max_tokens: int = 16000
-    curator_max_tokens: int = 16000
+    reflector_max_tokens: int = 24000
+    curator_max_tokens: int = 24000
     reflector_timeout_seconds: int = 1800
     curator_timeout_seconds: int = 1800
 
     create_time_similarity_threshold: float = 0.85
 ```
+
+These defaults assume a slightly larger/smarter model with enough context
+to compare more retrieved bullets and longer memory bodies. The prompts
+still instruct the reflector and curator to prefer fewer, higher-confidence
+edits over memory churn.
 
 CLI flags: `--trace / --no-trace`, `--trace-top-k`. Mutually exclusive
 with `--dynamic-ledger`.

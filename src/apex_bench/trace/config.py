@@ -21,7 +21,7 @@ class TraceConfig:
     enabled: bool = False
     embedding_model: str = "text-embedding-3-large"
     embedding_dim: int = 3072
-    top_k_per_axis: int = 5
+    top_k_per_axis: int = 8
 
     reflector_model: str | None = None
     curator_model: str | None = None
@@ -29,8 +29,8 @@ class TraceConfig:
 
     reflector_temperature: float = 1.0
     curator_temperature: float = 1.0
-    reflector_max_tokens: int = 16_000
-    curator_max_tokens: int = 16_000
+    reflector_max_tokens: int = 24_000
+    curator_max_tokens: int = 24_000
     reflector_timeout_seconds: int = 1800
     curator_timeout_seconds: int = 1800
 

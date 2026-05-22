@@ -536,7 +536,7 @@ def run(
         "ledger. See docs/TRACE_PRD.md.",
     ),
     trace_top_k: int = typer.Option(
-        5,
+        8,
         "--trace-top-k",
         min=0,
         help="Top-k per retrieval axis when TRACE is on.",
