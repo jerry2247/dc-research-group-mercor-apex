@@ -1219,16 +1219,27 @@ async def run_async(opts: RunOptions) -> dict:
         cfg_trace_in = opts.trace
         if cfg_trace_in.reflector_model is None or cfg_trace_in.curator_model is None:
             extra_args: dict[str, Any] = {}
+            # Flatten model_configs into kwargs so LiteLLM accepts them
+            # (mirrors the Dynamic-Ledger setup just above).
             if opts.profile.model_configs:
-                extra_args["model_configs"] = dict(opts.profile.model_configs)
+                extra_args.update(opts.profile.model_configs)
             if opts.profile.enable_thinking is not None:
                 extra_args["enable_thinking"] = opts.profile.enable_thinking
             if opts.profile.thinking_tokens is not None:
                 extra_args["thinking_tokens"] = opts.profile.thinking_tokens
+            # Prepend provider prefix when model_id is bare (e.g.
+            # "grok-4.3" → "xai/grok-4.3"). Without this LiteLLM raises
+            # "LLM Provider NOT provided" and the runner's outer except
+            # silently aborts the reflector/curator call.
+            bare = opts.profile.model_id
+            routed_bare = (
+                bare if "/" in bare or not opts.profile.provider
+                else f"{opts.profile.provider}/{bare}"
+            )
             cfg_trace_in = dataclasses.replace(
                 cfg_trace_in,
-                reflector_model=cfg_trace_in.reflector_model or opts.profile.model_id,
-                curator_model=cfg_trace_in.curator_model or opts.profile.model_id,
+                reflector_model=cfg_trace_in.reflector_model or routed_bare,
+                curator_model=cfg_trace_in.curator_model or routed_bare,
                 model_extra_args=extra_args or None,
             )
         cfg_trace_in = dataclasses.replace(
