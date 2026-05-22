@@ -1,41 +1,41 @@
 {
   "apex_bench_version": "0.1.0",
-  "created_or_updated_at": "2026-05-20T01:04:52+00:00",
+  "created_or_updated_at": "2026-05-22T07:37:42+00:00",
   "dataset": {
     "csv": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/data/APEX-v1-extended/data/train.csv",
     "csv_sha256": "71b241d2884457534856a831b640a0e4de7734c9a8f46b7d35174ee4b74320c9",
     "dir": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/data/APEX-v1-extended",
     "domains": [
-      "Finance"
+      "Legal"
     ],
-    "pending_tasks_at_start": 10,
+    "pending_tasks_at_start": 25,
     "selected_tasks": 25,
     "task_ids": [
-      "1588",
-      "2107",
-      "2108",
-      "2120",
-      "2121",
-      "2145",
-      "2157",
-      "2186",
-      "2192",
-      "2205",
-      "2217",
-      "2228",
-      "2230",
-      "2232",
-      "2261",
-      "2266",
-      "2269",
-      "2287",
-      "2288",
-      "2294",
-      "2302",
-      "2308",
-      "2315",
-      "2317",
-      "2333"
+      "13",
+      "845",
+      "942",
+      "1022",
+      "1031",
+      "1041",
+      "1078",
+      "1148",
+      "1167",
+      "1184",
+      "1189",
+      "1226",
+      "1230",
+      "1246",
+      "1318",
+      "1319",
+      "1323",
+      "1346",
+      "1361",
+      "1366",
+      "1367",
+      "1371",
+      "1382",
+      "1398",
+      "1757"
     ]
   },
   "judge": {
@@ -45,8 +45,8 @@
     "requested_temperature": 1.0
   },
   "outputs": {
-    "csv": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/runs/finance-grok43high/results.csv",
-    "failures_jsonl": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/runs/finance-grok43high/results.failures.jsonl",
+    "csv": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/runs/grok43high-baseline/results.csv",
+    "failures_jsonl": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench/runs/grok43high-baseline/results.failures.jsonl",
     "headers": [
       "task_id",
       "domain",
@@ -73,32 +73,41 @@
     ]
   },
   "progress": {
-    "saved_this_invocation": 10,
+    "saved_this_invocation": 25,
     "skipped_this_invocation": 0,
     "stats": {
       "by_domain": {
         "Finance": {
           "mean": 54.87,
           "n": 25
+        },
+        "Legal": {
+          "mean": 64.12,
+          "n": 25
         }
       },
-      "overall_mean": 54.87,
-      "total_completed": 25
+      "overall_mean": 59.49,
+      "total_completed": 50
     }
   },
   "repo": {
     "dirty": true,
     "dirty_status_short": [
-      "M .gitignore",
-      "?? data/",
-      "?? runs/"
+      "M runs/grok43high-baseline/results.csv",
+      " M runs/grok43high-baseline/results.run_manifest.json",
+      " M runs/grok43high-dl/results.csv",
+      " M runs/grok43high-dl/results.run_manifest.json",
+      "?? runs/grok43high-dl/memory/Legal/",
+      "?? runs/grok43high-dl/results.failures.jsonl",
+      "?? runs/legal-baseline.log",
+      "?? runs/legal-dl.log"
     ],
-    "head": "565130bb70a67db58bff3592130e5969de62938b",
+    "head": "8c7d890ced025be5e29ca008fee299bddbb71de5",
     "root": "/Users/jerrygu/Jerry Research/DC Collab Research/apex-bench"
   },
   "run_policy": {
-    "domain_filter": "Finance",
-    "limit": null,
+    "domain_filter": "Legal",
+    "limit": 25,
     "runs_per_task": 1,
     "start_index": 0,
     "task_ids": []
