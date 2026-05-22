@@ -198,11 +198,9 @@ reflector + curator pipeline with the adaptations enumerated above
 reflector + curator + generator, GT bit = `percentage_score >= 99.0`).
 
 ```bibtex
-@misc{liao2025trace,
+@misc{liao_nair_yang_2026_trace,
   title  = {TRACE: Tool-augmented Reasoning via Atomic Cheatsheet Editing},
-  author = {Liao, ... and Nair, ... and Yang, ...},
-  year   = {2025},
-  note   = {Stanford CS224N project},
-  url    = {https://web.stanford.edu/class/cs224n/project.html}
+  author = {Liao, Kyleen and Nair, Roshen and Yang, Arnold},
+  year   = {2026}
 }
 ```

@@ -91,7 +91,7 @@ array of ops:
 | `DELETE` | `entry_id`                          | Soft-delete                             |
 
 The three operations match the Dynamic Ledger approach in the
-**Dynamic Cheatsheet 2.0** codebase (Jerry / Shurui / Sabrina Yen-Ko; mentor:
+**Dynamic Cheatsheet 2.0** codebase (Jerry / Sabrina Yen-Ko / Shurui; mentor:
 Mirac Suzgun). No `CONSOLIDATE`, no `NO_OP` — neither exists in the DL
 approach.
 
@@ -178,26 +178,33 @@ curator_wall_seconds
 **No** GT-related columns. **No** criteria-related columns. **No**
 citation-related columns.
 
-## Curator-side principles
+## Curator prompt design
 
-The curator system prompt asks for a *senior reviewer*: critically
-diagnose what the colleague did well vs. thinly, prescribe domain
-standard practice when it is clear, hedge with conditions when it
-genuinely isn't. Five hard rules (R1-R5):
+The curator system prompt frames the ledger as a **reference cheatsheet**
+— a passive document of formulas, conventions, definitions, and pitfall
+flags that a future practitioner consults the way an analyst consults a
+clipped formula sheet. Entries are reference content, not procedures.
 
-1. **R1** — Workflows + critical diagnosis, not outcomes.
-2. **R2** — Ground in concrete examples from the deliverable; values
-   are illustrative.
-3. **R3** — Prescribe standard practice when clear; hedge with
-   conditions when not.
-4. **R4** — Extract substantive domain insights, not just process.
-5. **R5** — Capture micro-details that break practitioners.
+The exact prompt is in
+[`src/apex_bench/dynamic_ledger/prompts/curator_system.txt`](../src/apex_bench/dynamic_ledger/prompts/curator_system.txt).
+Every entry the curator emits must satisfy six properties:
 
-Two entry shapes: elaborate playbook entries (multi-paragraph
-workflows) and focused action notes (one tight paragraph for a narrow
-lesson). The default behavior is two-to-four ops per session; the
-curator is free to emit zero ops when the existing playbook already
-covers everything observed.
+- **S1** — reference content, not an instruction (formula, definition,
+  convention, or pitfall flag — not a procedure or step list).
+- **S2** — self-contained; readable without seeing the source case.
+- **S3** — reusable on structurally distinct future cases; no
+  case-specific numbers, dates, or named entities.
+- **S4** — domain-specific insight, not generic advice.
+- **S5** — short and dense (a tight paragraph; never a multi-section
+  workflow).
+- **S6** — `section` and `source_problem` name the *class* of case that
+  should trigger retrieval, precisely enough to be retrievable.
+
+Default behavior is zero, one, or two ops per session. The generator-side
+injection block (
+[`src/apex_bench/dynamic_ledger/prompts/generator_injection_block.txt`](../src/apex_bench/dynamic_ledger/prompts/generator_injection_block.txt)
+) frames the retrieved entries as a formula sheet the generator may
+consult but never follows; the generator's own analysis is authoritative.
 
 ## Tests
 
@@ -230,7 +237,7 @@ The **Dynamic Ledger** method itself — itemised strategy memory with
 typed `CREATE` / `UPDATE` / `DELETE` operations, dual-axis
 (strategy + source-problem) embedding retrieval, and a create-time
 similarity filter — is introduced in the **Dynamic Cheatsheet 2.0**
-codebase by **Jerry Gu, Shurui Liu, and Sabrina Yen-Ko** (Stanford
+codebase by **Jerry Gu, Sabrina Yen-Ko, and Shurui Liu** (Stanford
 SAIL; mentor: Mirac Suzgun). It is one of three memory architectures
 studied in DC2 alongside the Dynamic Cheatsheet variants (Suzgun et
 al., 2025) and ACE (Zhang et al., 2025).
@@ -240,12 +247,34 @@ The reference implementation lives at
 the DC2 codebase.
 
 ```bibtex
-@misc{gu_liu_yang_2025_dynamic_ledger,
-  title   = {Dynamic Ledger: itemised, dual-indexed strategy memory},
-  author  = {Gu, Jerry and Liu, Shurui and Yen-Ko, Sabrina},
-  note    = {Stanford SAIL; introduced in the Dynamic Cheatsheet 2.0
-             codebase. Mentor: Mirac Suzgun},
-  year    = {2025}
+@misc{gu_yenko_liu_2026_dynamic_ledger,
+  title  = {Dynamic Ledger: Retrieval-Augmented Structured Memory for
+            Test-Time Learning},
+  author = {Gu, Jerry and Yen-Ko, Sabrina and Liu, Shurui},
+  note   = {Mentor: Mirac Suzgun},
+  year   = {2026}
+}
+
+@misc{suzgun_yuksekgonul_bianchi_jurafsky_zou_2025_dynamic_cheatsheet,
+  title  = {Dynamic Cheatsheet: Test-Time Learning with Adaptive Memory},
+  author = {Suzgun, Mirac and Yuksekgonul, Mert and Bianchi, Federico and
+            Jurafsky, Dan and Zou, James},
+  year   = {2025},
+  eprint = {2504.07952},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url    = {https://arxiv.org/abs/2504.07952}
+}
+
+@misc{suzgun_kalai_2024_meta_prompting,
+  title  = {Meta-Prompting: Enhancing Language Models with Task-Agnostic
+            Scaffolding},
+  author = {Suzgun, Mirac and Kalai, Adam Tauman},
+  year   = {2024},
+  eprint = {2401.12954},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+  url    = {https://arxiv.org/abs/2401.12954}
 }
 ```
 
@@ -258,9 +287,10 @@ on strategy and source-problem embeddings, create-time cosine
 similarity gate (0.85) against the retrieved subset. The
 adaptations to this benchmark are scoped:
 
-- **Curator prompt content** — our critical-diagnosis / 5-rule (R1-R5)
-  framing replaces the DC2 prompt body. The output contract is
-  unchanged (same `<memory_updates>` block, same three ops).
+- **Curator prompt content** — a reference-cheatsheet framing with the
+  six properties (S1–S6) listed above replaces the DC2 prompt body. The
+  output contract is unchanged (same `<memory_updates>` block, same
+  three ops).
 - **Per-domain ledger** — one ledger per Mercor domain (Finance /
   Legal / Consulting / Medicine). The DC2 reference uses one global
   ledger; per-domain isolation prevents cross-domain pollution on a

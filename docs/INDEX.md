@@ -15,10 +15,13 @@ column. Start here if you're new.
 
 | Doc | What it answers | Read this if you're asking… |
 |---|---|---|
+| [`DYNAMIC_LEDGER_PRD.md`](DYNAMIC_LEDGER_PRD.md) | Specification of the Dynamic Ledger subsystem — pipeline, entry shape, curator prompt design, CSV columns | "How does `--dynamic-ledger` actually work?" |
+| [`TRACE_PRD.md`](TRACE_PRD.md) | Specification of the TRACE subsystem — pipeline, bullet shape, GT-bit threading, citation parsing | "How does `--trace` actually work?" |
 | [`AUDIT.md`](AUDIT.md) | Line-by-line confirmation we match Mercor's harness behavior. Records every fidelity check with the regression test that protects it. | "Are we really running Mercor's harness?" / "What did we change?" |
 | [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) | The 1-run/task policy, dataset license, self-bias caveats, what gets recorded per run | "Why one run, not eight?" / "Why isn't this leaderboard-comparable?" |
 | [`HARNESS_NOTES.md`](HARNESS_NOTES.md) | How the vendored harness works internally — generation/grading flow, model id surface, known vendor bugs we work around | "What does the harness actually do under the hood?" / "Why are we passing `grading_prompt_template` explicitly?" |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The wrapper-vs-vendor design split and our diff policy | "Why is this code in `src/` and not `vendor/`?" / "How do I resync upstream?" |
+| [`../results.md`](../results.md) | Per-domain × per-method results table, per-task breakdown, and a worked example of an additive Dynamic Ledger entry | "What numbers have we got so far?" |
 
 ## Provenance docs (in `vendor/apex_evals/`)
 
