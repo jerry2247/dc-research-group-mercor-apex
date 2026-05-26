@@ -1,5 +1,6 @@
-A senior partner reviewed earlier work in this area and left these notes
-for you. They are reference material — use what applies and ignore the
-rest. They are not answers; the case below has its own specifics.
+A senior partner reviewed prior work in this area and left these notes
+for the current case. They are reference material — scan them, use
+what applies, ignore what does not. They are not authoritative; the
+case below is what determines your answer.
 
 {cheatsheet}

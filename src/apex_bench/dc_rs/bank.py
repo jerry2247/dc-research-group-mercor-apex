@@ -1,12 +1,10 @@
-"""Memory bank — the persistent state DC-RS reads from and appends to.
+"""Memory pool — the persistent state DC-RS reads from and appends to.
 
-A ``BankEntry`` records one past ``(task_prompt, deliverable)`` pair
-along with the prompt embedding used for cosine retrieval. ``DomainBank``
-is the in-memory list of entries for a single domain. The on-disk
-representation is one JSON object per line in ``bank.jsonl``; append-only.
-
-No usage counters, no helpful/harmful flags, no soft-delete. Once an
-entry is appended, it stays for the duration of the run.
+Faithful to Suzgun et al.'s DC-RS reference: one global pool per run,
+not segmented by domain. Each ``BankEntry`` records one past
+``(task_prompt, deliverable)`` pair along with the prompt embedding
+used for cosine retrieval. The pool is append-only; no usage counters,
+no helpful/harmful flags, no soft-delete.
 """
 
 from __future__ import annotations
@@ -17,7 +15,12 @@ from pydantic import BaseModel, ConfigDict
 
 
 class BankEntry(BaseModel):
-    """One past pair in the bank, plus its prompt embedding."""
+    """One past pair in the pool, plus its prompt embedding.
+
+    Mirrors Suzgun's ``PoolEntry`` shape adapted to apex-bench's
+    prose-only surface (where ``deliverable`` is the verbatim generator
+    response — there is no separate ``embedding_text`` field because
+    apex-bench's embedding text and query are the same string)."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -30,10 +33,9 @@ class BankEntry(BaseModel):
 
 
 @dataclass
-class DomainBank:
-    """In-memory bank for a single domain. Ordered by insertion."""
+class Bank:
+    """The single global pool for a DC-RS run."""
 
-    domain: str
     entries: list[BankEntry] = field(default_factory=list)
 
     def append(self, entry: BankEntry) -> None:

@@ -1,7 +1,8 @@
 """Load-bearing fidelity invariants for DC-RS.
 
-If any of these fails, the on/off invariants the rest of the harness
-depends on no longer hold.
+Each test pins a system-level property of the implementation that, if
+broken, would cause DC-RS to diverge from Suzgun et al.'s reference
+or to leak information / domain assumptions it should not have.
 """
 
 from __future__ import annotations
@@ -52,10 +53,11 @@ def test_csv_mutex_dc_rs_and_trace_raises() -> None:
 
 
 def test_synthesizer_signature_has_no_outcome_inputs() -> None:
-    """The synthesizer must NOT receive ``criteria``, ``score``,
-    ``gt_correct``, ``expected_answer``, or ``judge_rationale``.
-    This is the load-bearing fidelity invariant for the no-grading
-    property of DC-RS."""
+    """The synthesizer must NOT receive grading data of any kind. The
+    accepted ``task_id`` parameter is for provenance tagging in
+    cheatsheet entries (``(Reference: <task_id>, …)``) only — not a
+    grading signal. This is the load-bearing fidelity invariant for
+    the no-grading property of DC-RS."""
     from apex_bench.dc_rs import synthesize
 
     sig = inspect.signature(synthesize)
@@ -65,23 +67,51 @@ def test_synthesizer_signature_has_no_outcome_inputs() -> None:
     assert "gt_correct" not in params
     assert "expected_answer" not in params
     assert "judge_rationale" not in params
-    # And the only inputs are the three content placeholders + cfg:
-    assert params == ["current_cheatsheet", "retrieved_entries_block", "task_prompt", "cfg"]
+    assert "rubric" not in params
+    assert params == [
+        "current_cheatsheet",
+        "retrieved_entries_block",
+        "task_prompt",
+        "task_id",
+        "cfg",
+    ]
 
 
-def test_dc_rs_prompts_have_no_code_execution_references() -> None:
-    """apex-bench has no code-execution surface. The prompts must not
+def test_synthesizer_prompt_has_no_code_execution_references() -> None:
+    """apex-bench has no code-execution surface. The prompt must not
     reference Python execution or ``<execute_python>`` blocks."""
     prompt_dir = Path(__file__).parent.parent / "src" / "apex_bench" / "dc_rs" / "prompts"
-    for name in (
-        "synthesizer_system.txt",
-        "synthesizer_user_template.txt",
-        "generator_injection_template.txt",
-    ):
+    for name in ("synthesizer_prompt.txt", "generator_injection_template.txt"):
         body = (prompt_dir / name).read_text(encoding="utf-8")
         assert "<execute_python>" not in body, f"{name} references code execution"
-        # Also check the more general execution-tag pattern.
         assert "execute_python" not in body.lower(), f"{name} references execute_python"
+
+
+def test_synthesizer_prompt_has_no_domain_specific_terms() -> None:
+    """The prompt must remain domain-agnostic — no benchmark-specific
+    terminology that would prejudice the synthesizer toward one
+    domain. The output cheatsheet is free to use domain-fluent
+    vocabulary appropriate to the case; the *prompt instructions* are
+    not."""
+    import re
+
+    forbidden = (
+        # Domain names
+        r"\bfinance\b", r"\bfinancial\b", r"\blegal\b", r"\bjurisdiction\b",
+        r"\bmedicine\b", r"\bmedical\b", r"\bclinical\b", r"\bpatient\b",
+        r"\bconsulting\b", r"\bconsultant\b",
+        # Domain-specific terms a junior would expect to see in a finance prompt etc.
+        r"\bM&A\b", r"\bLBO\b", r"\bMOIC\b", r"\bIRR\b(?!_)", r"\bEBITDA\b",
+        r"\bWACC\b", r"\bDCF\b", r"\bGAAP\b", r"\bSEC\b",
+        r"\bstatute\b", r"\battorney\b", r"\blawyer\b", r"\bdoctor\b",
+        r"\bdiagnosis\b", r"\bsymptom\b", r"\bdrug\b",
+    )
+    prompt_dir = Path(__file__).parent.parent / "src" / "apex_bench" / "dc_rs" / "prompts"
+    for name in ("synthesizer_prompt.txt", "generator_injection_template.txt"):
+        body = (prompt_dir / name).read_text(encoding="utf-8")
+        for pat in forbidden:
+            hits = re.findall(pat, body, re.IGNORECASE)
+            assert not hits, f"{name} leaks domain term {pat!r}: {hits}"
 
 
 def test_generator_injection_template_has_cheatsheet_placeholder() -> None:
@@ -90,9 +120,23 @@ def test_generator_injection_template_has_cheatsheet_placeholder() -> None:
     assert "{cheatsheet}" in body
 
 
-def test_synthesizer_user_template_has_three_placeholders() -> None:
+def test_synthesizer_prompt_has_four_placeholders() -> None:
     prompt_dir = Path(__file__).parent.parent / "src" / "apex_bench" / "dc_rs" / "prompts"
-    body = (prompt_dir / "synthesizer_user_template.txt").read_text(encoding="utf-8")
+    body = (prompt_dir / "synthesizer_prompt.txt").read_text(encoding="utf-8")
     assert "{current_cheatsheet}" in body
     assert "{retrieved_entries}" in body
     assert "{task_prompt}" in body
+    assert "{task_id}" in body
+
+
+def test_synthesizer_prompt_uses_senior_partner_framing() -> None:
+    prompt_dir = Path(__file__).parent.parent / "src" / "apex_bench" / "dc_rs" / "prompts"
+    body = (prompt_dir / "synthesizer_prompt.txt").read_text(encoding="utf-8")
+    assert "senior partner" in body.lower()
+    assert "junior" in body.lower()
+
+
+def test_generator_wrapper_uses_senior_partner_framing() -> None:
+    prompt_dir = Path(__file__).parent.parent / "src" / "apex_bench" / "dc_rs" / "prompts"
+    body = (prompt_dir / "generator_injection_template.txt").read_text(encoding="utf-8")
+    assert "senior partner" in body.lower()

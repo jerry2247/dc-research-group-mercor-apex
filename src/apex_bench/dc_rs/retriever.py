@@ -1,16 +1,16 @@
-"""Top-k cosine retrieval over a per-domain memory bank.
+"""Top-k cosine retrieval over the single global memory pool.
 
-Single-axis: the retrieval key is the prompt embedding only. There is
-no similarity threshold, no dedup, no domain filter at this layer (the
-caller picks the domain bank). The ``k`` is fixed by the caller; DC-RS
-ships with ``k = 3``.
+Faithful to Suzgun et al.'s DC-RS reference (``dc_rs.py:_retrieve``):
+single-axis cosine on the prompt embedding, no similarity threshold,
+no dedup. The pool itself is global per run; the caller passes the
+``Bank`` to score against.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from apex_bench.dc_rs.bank import BankEntry, DomainBank
+from apex_bench.dc_rs.bank import Bank, BankEntry
 from apex_bench.dc_rs.embeddings import cosine_similarity
 
 
@@ -23,21 +23,27 @@ class Retrieved:
 
 
 def retrieve(
-    bank: DomainBank,
+    bank: Bank,
     *,
     query_embedding: list[float],
     k: int = 3,
 ) -> list[Retrieved]:
     """Return up to ``k`` entries ranked by descending cosine similarity.
 
-    Returns an empty list when the bank is empty. When the bank has fewer
-    than ``k`` entries, returns all of them (sorted by similarity).
+    Returns an empty list when the pool is empty. When the pool has
+    fewer than ``k`` entries, returns all of them (sorted by similarity).
     """
     if not bank.entries or k <= 0:
         return []
-    scored = [
-        Retrieved(entry=e, similarity=cosine_similarity(query_embedding, e.prompt_embedding))
-        for e in bank.entries
-    ]
-    scored.sort(key=lambda r: r.similarity, reverse=True)
+    scored = sorted(
+        (
+            Retrieved(
+                entry=e,
+                similarity=cosine_similarity(query_embedding, e.prompt_embedding),
+            )
+            for e in bank.entries
+        ),
+        key=lambda r: r.similarity,
+        reverse=True,
+    )
     return scored[:k]

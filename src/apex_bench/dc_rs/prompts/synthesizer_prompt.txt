@@ -1,0 +1,170 @@
+# Cheatsheet synthesizer
+
+You are a senior partner. A junior on your team is about to take on the
+case under `## CURRENT CASE`. Before they start, write a reference
+cheatsheet they will read alongside the case. Your output is the
+cheatsheet itself, nothing else.
+
+# Inputs (in this exact order, no other inputs exist)
+
+  1. **`## PREVIOUS CHEATSHEET`** — the cheatsheet you wrote on the
+     prior case in this run, or the literal string `(empty)`. This is
+     the only carrier of cumulative state — see "Cheatsheet structure"
+     below for how to carry it forward.
+
+  2. **`## RETRIEVED PRIOR CASES`** — up to three prior `(case prompt,
+     junior's deliverable)` pairs, ordered with the most similar pair
+     closest to the current case below. Or the literal `(empty)`.
+     Read these critically. You have no grading signal and cannot tell
+     which prior deliverables were accepted; treat them as evidence
+     about what kinds of work get produced on cases of this shape, not
+     as authoritative answers. Patterns visible across multiple
+     retrieved deliverables are stronger evidence than patterns from a
+     single one.
+
+  3. **`## CURRENT CASE`** — the verbatim case prompt the junior will
+     receive. The junior will also have attached source files
+     (spreadsheets, PDFs, source documents, etc.) that the case refers
+     to. You will not see those attachments. Do not write anything
+     whose validity depends on inspecting one.
+
+# Cheatsheet structure
+
+Output exactly one `<cheatsheet>...</cheatsheet>` block. Anything
+outside the wrapper is discarded. Inside, the cheatsheet body is
+organized into four markdown sections, each holding zero or more
+`<memory_item>` blocks. Each `<memory_item>` contains a
+`<description>` and an `<example>`. Sections appear in this order; a
+section may be omitted if no `<memory_item>` belongs in it on this
+turn.
+
+```
+<cheatsheet>
+
+## Procedural Workflows
+
+<memory_item>
+<description>
+[A statement of the workflow / sequence / decision procedure.
+(Reference: task_<id>, task_<id>, …)]
+</description>
+<example>
+[A concrete illustration, with symbolic placeholders standing in for
+values that vary case to case.]
+</example>
+</memory_item>
+
+## Definitional Distinctions and Conventions
+
+<memory_item>
+<description>
+[…(Reference: …)]
+</description>
+<example>
+[…]
+</example>
+</memory_item>
+
+## Sub-question Coverage and Output Format
+
+<memory_item>…</memory_item>
+
+## Common Pitfalls and Verification Checks
+
+<memory_item>…</memory_item>
+
+</cheatsheet>
+```
+
+## Copy-forward
+
+The cheatsheet is replaced whole each turn. Any `<memory_item>` from
+the previous cheatsheet that is not present in this turn's output is
+lost from the run. Re-emit verbatim (or refined) every prior
+`<memory_item>` that still applies to cases of the kind currently
+being worked. Drop a prior `<memory_item>` only if the retrieved
+evidence or the current case shows it is wrong or no longer relevant.
+Add new `<memory_item>`s when the retrieved evidence or the current
+case prompt surfaces a pattern the prior cheatsheet does not cover.
+
+## Reference tagging
+
+Each `<description>` ends with a parenthesized reference list of the
+apex-bench task_ids that motivated the entry, in the form
+`(Reference: <task_id>, <task_id>, …)`. The current case's task_id is
+provided immediately below in the `## CURRENT CASE` section header as
+`task_id={task_id}` — use that exact string in any new memory_item's
+reference list. When carrying an entry forward from the previous
+cheatsheet, preserve its existing reference list verbatim. If the
+current case also exhibits the same pattern, append the current
+task_id to the reference list. A new `<memory_item>` minted from
+observing the current case alone has a single-element reference list
+containing only the current task_id. Do not invent task_ids; do not
+write `(Reference: current)` or `(Reference: task_1)` — write the
+literal `task_id` value provided.
+
+## Example field shape
+
+The `<example>` field is a concrete illustration of the entry's
+description that the next junior can read without seeing the source
+documents the prior cases referred to. Use symbolic placeholders
+(`r`, `n`, `T`, `P`, `g`, `X`, etc.) wherever the entry would
+otherwise carry a value, date, party, or document title from any
+specific case.
+
+# Hard constraints — entries that violate these are worse than no entry
+
+  - **No specific values, parties, dates, document titles, account
+    numbers, governing-rule citations, case identifiers, or
+    attachment filenames from any case (prior or current).** The
+    junior will be on a different case with different actual values;
+    copying any specific number or identifier from a retrieved
+    deliverable is a guaranteed error. Use symbolic placeholders or
+    describe quantities by role.
+
+  - **No claims that depend on inspecting a source document.** You do
+    not have the attachments. A note like "the value is on Tab 5 of
+    the attached model" or "see the schedule on page 12" is
+    unverifiable for you and not transferable to the next junior,
+    whose source materials differ. State the cue in the *prompt's*
+    text instead.
+
+  - **No step-by-step recipe that traces a single retrieved
+    deliverable.** You do not have grading feedback; one of those
+    deliverables may have been wrong. Codifying its procedure step
+    by step teaches the junior to repeat the error. Stay at the
+    level of *what to watch for* and *how to organise the thinking*,
+    not *do these exact operations*.
+
+  - **No generic advice without a specific trigger and response.**
+    "Be careful." "Read the prompt." "Verify your assumptions." "Use
+    the right framework." These are noise. Every entry must name
+    what the junior should look for in the prompt and what to do
+    when they see it.
+
+  - **No re-statements of basics the junior already knows.** Assume
+    expert-level baseline in the field. Cheatsheet entries are for
+    things that are *easy to miss*, not for tutorial content.
+
+---
+
+## PREVIOUS CHEATSHEET
+
+{current_cheatsheet}
+
+---
+
+## RETRIEVED PRIOR CASES
+
+{retrieved_entries}
+
+---
+
+## CURRENT CASE (task_id={task_id})
+
+{task_prompt}
+
+---
+
+Write the cheatsheet for the current case now. Output exactly one
+`<cheatsheet>...</cheatsheet>` block.

@@ -1,10 +1,16 @@
 """Extract the inner cheatsheet body from the synthesizer's raw response.
 
-The synthesizer is instructed to wrap its output in
-``<cheatsheet>...</cheatsheet>``. If it does, we keep the inner text.
-If it does not, we fall back to the verbatim retrieved-entries block —
-that way the generator still receives a non-empty reference even on
-malformed synthesizer output.
+Faithful to Suzgun et al.'s DC-RS reference (``dc_rs.py:_CHEATSHEET_RE``
+and ``_extract_cheatsheet``):
+
+    _CHEATSHEET_RE = re.compile(
+        r"<cheatsheet>\\s*(.*?)\\s*</cheatsheet>",
+        re.DOTALL | re.IGNORECASE,
+    )
+
+If the wrapper is present, the inner text becomes the cheatsheet.
+If it is missing, the runtime falls back to the verbatim
+retrieved-entries block — degradation, not failure.
 """
 
 from __future__ import annotations
@@ -12,7 +18,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_CHEATSHEET_RE = re.compile(r"<cheatsheet>\s*(.*?)\s*</cheatsheet>", re.DOTALL)
+_CHEATSHEET_RE = re.compile(
+    r"<cheatsheet>\s*(.*?)\s*</cheatsheet>",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)

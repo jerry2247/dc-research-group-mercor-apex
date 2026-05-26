@@ -1,13 +1,13 @@
 """Single synthesizer LLM call.
 
-Inputs: the previous-task cheatsheet (or the literal string ``(empty)``
-on the first task), the formatted retrieved-entries block, and the
-current task prompt. Output: a fresh cheatsheet for the current task.
+Faithful to Suzgun et al.'s DC-RS reference (``dc_rs.py:137-170``),
+which renders the whole curator prompt (instructions + previous
+cheatsheet + retrieved entries + current query) into ONE user message
+and sends it with ``system=None``. We do the same: the single
+``synthesizer_prompt.txt`` template contains the entire prompt, and
+the LiteLLM call uses messages=[{"role":"user", ...}] only.
 
-The synthesizer's raw response is parsed by ``extract_cheatsheet`` —
-the wrapper around the LiteLLM call only handles transport and
-diagnostics, not content shaping. No ground-truth signal is consumed
-anywhere in this module.
+No ground-truth signal is consumed anywhere in this module.
 """
 
 from __future__ import annotations
@@ -46,16 +46,24 @@ def synthesize(
     current_cheatsheet: str,
     retrieved_entries_block: str,
     task_prompt: str,
+    task_id: str,
     cfg: DCRSConfig,
 ) -> SynthesizerResult:
     """Run the synthesizer LLM call and return the parsed cheatsheet.
 
-    The function takes exactly four arguments — the previous cheatsheet,
-    the formatted retrieved-entries block, the current task prompt, and
-    the config. There is no ``criteria`` argument, no ``score`` argument,
-    no ``gt_correct`` argument, no ``expected_answer`` argument. This
-    narrow signature is the load-bearing fidelity invariant of DC-RS:
-    the synthesizer never sees grading data.
+    Five keyword-only arguments — the previous cheatsheet, the formatted
+    retrieved-entries block, the current task prompt, the current task's
+    identifier (used only for the ``(Reference: ...)`` provenance tag
+    inside cheatsheet entries; not a grading signal), and the config.
+    There is no ``criteria``, ``score``, ``gt_correct``,
+    ``expected_answer``, ``judge_rationale``, or ``rubric`` parameter.
+    This narrow signature is the load-bearing fidelity invariant of
+    DC-RS: the synthesizer never sees grading data.
+
+    The synthesizer prompt template (a single file) is rendered with
+    the four placeholders, and the result is sent as a single user
+    message — matching Suzgun's reference, which does not split the
+    synthesizer call into separate system / user messages.
     """
     if cfg.synthesizer_model is None:
         raise RuntimeError(
@@ -64,12 +72,12 @@ def synthesize(
             "docs/DC_RS_PRD.md."
         )
 
-    sys_msg = _load_prompt("synthesizer_system.txt")
-    user_template = _load_prompt("synthesizer_user_template.txt")
+    template = _load_prompt("synthesizer_prompt.txt")
     user_msg = (
-        user_template.replace("{current_cheatsheet}", current_cheatsheet)
+        template.replace("{current_cheatsheet}", current_cheatsheet)
         .replace("{retrieved_entries}", retrieved_entries_block)
         .replace("{task_prompt}", task_prompt)
+        .replace("{task_id}", task_id)
     )
 
     import litellm
@@ -78,7 +86,6 @@ def synthesize(
     kwargs: dict = {
         "model": cfg.synthesizer_model,
         "messages": [
-            {"role": "system", "content": sys_msg},
             {"role": "user", "content": user_msg},
         ],
         "temperature": cfg.synthesizer_temperature,
