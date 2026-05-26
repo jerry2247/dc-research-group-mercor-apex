@@ -662,21 +662,19 @@ async def _process_task(
         from apex_bench.dc_rs.runtime import dc_rs_csv_fragment_empty
 
         dc_rs_csv = dc_rs_csv_fragment_empty()
-        bank = dc_rs_runtime.bank_for(task.domain)
-        dc_rs_csv["dc_rs_bank_size_before"] = len(bank.entries)
+        dc_rs_csv["dc_rs_bank_size_before"] = len(dc_rs_runtime.bank.entries)
         try:
             q_emb = dc_rs_runtime.embed.embed([task.prompt])[0]
             retrieved = dc_rs_retrieve(
-                bank,
+                dc_rs_runtime.bank,
                 query_embedding=q_emb,
                 k=dc_rs_runtime.cfg.top_k,
             )
         except Exception as exc:
             log.warning(
-                "dc-rs: retrieval failed for task=%s domain=%s (%s); "
+                "dc-rs: retrieval failed for task=%s (%s); "
                 "proceeding without retrieval",
                 task.task_id,
-                task.domain,
                 exc,
             )
             retrieved = []
@@ -686,21 +684,22 @@ async def _process_task(
             [r.entry.bank_id for r in retrieved]
         )
         retrieved_block = dc_rs_format_entries(retrieved)
-        current_ch = dc_rs_runtime.cheatsheet_for(task.domain)
+        current_ch = dc_rs_runtime.cheatsheet
         try:
             syn = dc_rs_synthesize(
                 current_cheatsheet=current_ch,
                 retrieved_entries_block=retrieved_block,
                 task_prompt=task.prompt,
+                task_id=task.task_id,
                 cfg=dc_rs_runtime.cfg,
             )
             new_ch = syn.cheatsheet
-            dc_rs_runtime.write_cheatsheet(task.domain, new_ch)
-            dc_rs_runtime.archive_cheatsheet(task.domain, task.task_id, new_ch)
+            dc_rs_runtime.write_cheatsheet(new_ch)
+            dc_rs_runtime.archive_cheatsheet(task.task_id, new_ch)
             dc_rs_runtime.append_synth_log(
-                task.domain,
                 {
                     "task_id": task.task_id,
+                    "domain": task.domain,
                     "retrieved_bank_ids": [r.entry.bank_id for r in retrieved],
                     "retrieved_similarities": [round(r.similarity, 4) for r in retrieved],
                     "prompt_tokens": syn.prompt_tokens,
@@ -718,10 +717,9 @@ async def _process_task(
             augmented_user_prompt = dc_rs_augment(task.prompt, cheatsheet=new_ch)
         except Exception as exc:
             log.warning(
-                "dc-rs: synthesizer failed for task=%s domain=%s (%s); "
+                "dc-rs: synthesizer failed for task=%s (%s); "
                 "proceeding with the un-augmented prompt",
                 task.task_id,
-                task.domain,
                 exc,
             )
 
@@ -912,18 +910,15 @@ async def _process_task(
     }
 
     # --- DC-RS Hook B: append the new (prompt, deliverable) pair to the
-    # per-domain bank. NO ground-truth signal is consumed. Per the
+    # single global pool. NO ground-truth signal is consumed. Per the
     # test_synthesizer_signature_has_no_outcome fidelity test.
     if dc_rs_runtime is not None:
         if not q_emb:
             # Hook A failed to embed the prompt; nothing to append.
-            dc_rs_csv["dc_rs_bank_size_after"] = len(
-                dc_rs_runtime.bank_for(task.domain).entries
-            )
+            dc_rs_csv["dc_rs_bank_size_after"] = len(dc_rs_runtime.bank.entries)
         else:
             try:
                 bank_id = dc_rs_runtime.append_entry(
-                    domain=task.domain,
                     task_id=task.task_id,
                     task_prompt=task.prompt,
                     deliverable=response_for_grading,
@@ -932,16 +927,13 @@ async def _process_task(
                 dc_rs_csv["dc_rs_appended_bank_id"] = bank_id
             except Exception as exc:
                 log.warning(
-                    "dc-rs: bank append failed for task=%s domain=%s (%s); "
+                    "dc-rs: bank append failed for task=%s (%s); "
                     "the cheatsheet was already written for this task but the "
                     "pair will not contribute to retrieval on later tasks",
                     task.task_id,
-                    task.domain,
                     exc,
                 )
-            dc_rs_csv["dc_rs_bank_size_after"] = len(
-                dc_rs_runtime.bank_for(task.domain).entries
-            )
+            dc_rs_csv["dc_rs_bank_size_after"] = len(dc_rs_runtime.bank.entries)
         row.update(dc_rs_csv)
 
     # --- TRACE Hook B: bump counters, reflect, curate, apply, persist ------

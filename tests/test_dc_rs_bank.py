@@ -1,10 +1,10 @@
-"""Unit tests for DC-RS bank entry shape and DomainBank sequencing."""
+"""Unit tests for DC-RS bank entry shape and Bank sequencing."""
 
 from __future__ import annotations
 
 import json
 
-from apex_bench.dc_rs.bank import BankEntry, DomainBank
+from apex_bench.dc_rs.bank import Bank, BankEntry
 
 
 def _make_entry(idx: int) -> BankEntry:
@@ -44,8 +44,10 @@ def test_bank_entry_ignores_extra_fields() -> None:
     assert e.bank_id == "bank-00001"
 
 
-def test_domain_bank_sequencing() -> None:
-    bank = DomainBank(domain="Finance")
+def test_bank_sequencing_is_global_not_per_domain() -> None:
+    """Suzgun's DC-RS uses a single global pool. ``Bank`` mirrors that —
+    no domain parameter, no per-domain segmentation."""
+    bank = Bank()
     assert bank.entries == []
     assert bank.next_bank_id() == "bank-00001"
     assert bank.next_added_ordinal() == 0

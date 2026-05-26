@@ -1,4 +1,8 @@
-"""Unit tests for the <cheatsheet>...</cheatsheet> extractor + fallback path."""
+"""Unit tests for the <cheatsheet>...</cheatsheet> extractor + fallback path.
+
+Mirrors Suzgun's ``_CHEATSHEET_RE`` which uses ``re.DOTALL | re.IGNORECASE``
+(``dc_rs.py:63-66``).
+"""
 
 from __future__ import annotations
 
@@ -38,3 +42,12 @@ def test_extract_multiline_body_preserved() -> None:
     out = extract_cheatsheet(raw, fallback="FALLBACK")
     assert out.used_fallback is False
     assert out.cheatsheet == body
+
+
+def test_extract_case_insensitive_wrapper() -> None:
+    """Suzgun's regex uses ``re.IGNORECASE`` so a model emitting
+    ``<Cheatsheet>`` (or any case) still matches."""
+    raw = "<Cheatsheet>body</CHEATSHEET>"
+    out = extract_cheatsheet(raw, fallback="FALLBACK")
+    assert out.used_fallback is False
+    assert out.cheatsheet == "body"

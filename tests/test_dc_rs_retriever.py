@@ -1,8 +1,8 @@
-"""Unit tests for the single-axis cosine retriever."""
+"""Unit tests for the single-axis cosine retriever over the global pool."""
 
 from __future__ import annotations
 
-from apex_bench.dc_rs.bank import BankEntry, DomainBank
+from apex_bench.dc_rs.bank import Bank, BankEntry
 from apex_bench.dc_rs.retriever import retrieve
 
 
@@ -17,13 +17,13 @@ def _entry(idx: int, vec: list[float]) -> BankEntry:
     )
 
 
-def test_retrieve_empty_bank_returns_empty_list() -> None:
-    bank = DomainBank(domain="Finance")
+def test_retrieve_empty_pool_returns_empty_list() -> None:
+    bank = Bank()
     assert retrieve(bank, query_embedding=[1.0, 0.0], k=3) == []
 
 
 def test_retrieve_returns_at_most_k() -> None:
-    bank = DomainBank(domain="Finance")
+    bank = Bank()
     bank.append(_entry(1, [1.0, 0.0]))
     bank.append(_entry(2, [0.9, 0.1]))
     bank.append(_entry(3, [0.0, 1.0]))
@@ -31,13 +31,12 @@ def test_retrieve_returns_at_most_k() -> None:
     bank.append(_entry(5, [-1.0, 0.0]))
     out = retrieve(bank, query_embedding=[1.0, 0.0], k=3)
     assert len(out) == 3
-    # Ranked by descending cosine: t-1, t-2, t-4.
     assert [r.entry.task_id for r in out] == ["t-1", "t-2", "t-4"]
     assert out[0].similarity >= out[1].similarity >= out[2].similarity
 
 
-def test_retrieve_bank_smaller_than_k_returns_all() -> None:
-    bank = DomainBank(domain="Finance")
+def test_retrieve_pool_smaller_than_k_returns_all() -> None:
+    bank = Bank()
     bank.append(_entry(1, [1.0, 0.0]))
     bank.append(_entry(2, [0.0, 1.0]))
     out = retrieve(bank, query_embedding=[1.0, 0.0], k=3)
@@ -46,6 +45,6 @@ def test_retrieve_bank_smaller_than_k_returns_all() -> None:
 
 
 def test_retrieve_k_zero_returns_empty() -> None:
-    bank = DomainBank(domain="Finance")
+    bank = Bank()
     bank.append(_entry(1, [1.0, 0.0]))
     assert retrieve(bank, query_embedding=[1.0, 0.0], k=0) == []
